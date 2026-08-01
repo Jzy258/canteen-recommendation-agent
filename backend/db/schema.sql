@@ -1,0 +1,136 @@
+-- ============================================================
+-- 食堂菜品推荐与营养分析 Agent — SQLite Schema
+-- 版本：v1.0
+-- 所有者：A · 数据与算法
+-- 说明：本 schema 为唯一来源，B 的 store/record 工具只读此 schema
+-- ============================================================
+
+-- 1. dish — 菜品库
+CREATE TABLE IF NOT EXISTS dish (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT    NOT NULL UNIQUE,              -- 菜品名称
+    calories        REAL    NOT NULL,                     -- 热量 (kcal/份)
+    protein         REAL    NOT NULL,                     -- 蛋白质 (g/份)
+    carbs           REAL    NOT NULL,                     -- 碳水化合物 (g/份)
+    fat             REAL    NOT NULL,                     -- 脂肪 (g/份)
+    price           REAL    NOT NULL,                     -- 价格 (元)
+    category        TEXT    NOT NULL,                     -- 类别：荤菜/素菜/汤/主食/水果/饮品
+    flavor_tags     TEXT    DEFAULT '',                   -- 口味标签，逗号分隔，如 "辣,酸甜"
+    source          TEXT    NOT NULL,                     -- 参考来源，如 "中国食物成分表第6版"
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_dish_category ON dish(category);
+CREATE INDEX IF NOT EXISTS idx_dish_price   ON dish(price);
+CREATE INDEX IF NOT EXISTS idx_dish_name    ON dish(name);
+
+
+-- 2. menu — 每日菜单（5天×3餐）
+CREATE TABLE IF NOT EXISTS menu (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    date            TEXT    NOT NULL,                     -- 日期，如 "2026-08-03"
+    meal_time       TEXT    NOT NULL,                     -- 餐次：breakfast / lunch / dinner
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    UNIQUE(date, meal_time)
+);
+
+CREATE INDEX IF NOT EXISTS idx_menu_date ON menu(date);
+
+
+-- 3. menu_item — 菜单与菜品的多对多关联
+CREATE TABLE IF NOT EXISTS menu_item (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    menu_id         INTEGER NOT NULL REFERENCES menu(id) ON DELETE CASCADE,
+    dish_id         INTEGER NOT NULL REFERENCES dish(id) ON DELETE CASCADE,
+    UNIQUE(menu_id, dish_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_menu_item_menu ON menu_item(menu_id);
+CREATE INDEX IF NOT EXISTS idx_menu_item_dish ON menu_item(dish_id);
+
+
+-- 4. meal_record — 摄入记录（HITL 确认后写入）
+CREATE TABLE IF NOT EXISTS meal_record (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    date            TEXT    NOT NULL,                     -- 日期，如 "2026-08-03"
+    meal_time       TEXT    NOT NULL,                     -- 餐次：breakfast / lunch / dinner
+    dish_id         INTEGER NOT NULL REFERENCES dish(id) ON DELETE CASCADE,
+    portion         REAL    NOT NULL DEFAULT 1.0,         -- 份量系数，1.0 = 1份
+    confirmed       INTEGER NOT NULL DEFAULT 0,           -- HITL 状态：0=待确认, 1=已确认, -1=已拒绝
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_meal_record_date      ON meal_record(date);
+CREATE INDEX IF NOT EXISTS idx_meal_record_confirmed ON meal_record(confirmed);
+CREATE INDEX IF NOT EXISTS idx_meal_record_dish      ON meal_record(dish_id);
+
+
+-- 5. user_profile — 用户画像（长期记忆）
+CREATE TABLE IF NOT EXISTS user_profile (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    budget                  REAL    DEFAULT 0,            -- 预算（元/餐）
+    flavor_preferences      TEXT    DEFAULT '',           -- 口味偏好，逗号分隔
+    dietary_restrictions    TEXT    DEFAULT '',           -- 忌口/过敏，逗号分隔
+    health_goals            TEXT    DEFAULT '',           -- 营养目标：高蛋白/控油/控糖/增肌/减脂
+    -- 历史营养汇总（JSON），如 {"avg_calories": 650, "avg_protein": 28, ...}
+    nutrition_summary       TEXT    DEFAULT '{}',
+    created_at              TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at              TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+
+-- ============================================================
+-- 常用查询视图
+-- ============================================================
+
+-- 按天/餐次查看完整菜单（含菜品信息）
+CREATE VIEW IF NOT EXISTS v_menu_detail AS
+SELECT
+    m.date,
+    m.meal_time,
+    d.id          AS dish_id,
+    d.name        AS dish_name,
+    d.calories,
+    d.protein,
+    d.carbs,
+    d.fat,
+    d.price,
+    d.category,
+    d.flavor_tags
+FROM menu m
+JOIN menu_item mi ON m.id = mi.menu_id
+JOIN dish d       ON mi.dish_id = d.id
+ORDER BY m.date, m.meal_time, d.id;
+
+
+-- 按天汇总营养摄入（仅已确认记录）
+CREATE VIEW IF NOT EXISTS v_daily_nutrition AS
+SELECT
+    mr.date,
+    mr.meal_time,
+    SUM(d.calories * mr.portion) AS total_calories,
+    SUM(d.protein  * mr.portion) AS total_protein,
+    SUM(d.carbs    * mr.portion) AS total_carbs,
+    SUM(d.fat      * mr.portion) AS total_fat,
+    COUNT(DISTINCT d.id)          AS dish_count
+FROM meal_record mr
+JOIN dish d ON mr.dish_id = d.id
+WHERE mr.confirmed = 1
+GROUP BY mr.date, mr.meal_time
+ORDER BY mr.date, mr.meal_time;
+
+
+-- 按周汇总营养摄入（仅已确认记录）
+CREATE VIEW IF NOT EXISTS v_weekly_nutrition AS
+SELECT
+    strftime('%Y-%W', mr.date)   AS week_key,
+    mr.date,
+    SUM(d.calories * mr.portion) AS total_calories,
+    SUM(d.protein  * mr.portion) AS total_protein,
+    SUM(d.carbs    * mr.portion) AS total_carbs,
+    SUM(d.fat      * mr.portion) AS total_fat
+FROM meal_record mr
+JOIN dish d ON mr.dish_id = d.id
+WHERE mr.confirmed = 1
+GROUP BY mr.date
+ORDER BY mr.date;
