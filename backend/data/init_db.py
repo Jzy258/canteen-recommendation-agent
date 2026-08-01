@@ -13,6 +13,7 @@
 
 import csv
 import os
+import sqlite3
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "db"))
@@ -94,8 +95,6 @@ def main():
 
     # ---- 导入菜单（若存在） ----
     if os.path.exists(MENU_CSV):
-        import sqlite3
-
         menu_rows = load_menu(MENU_CSV)
         print(f"\n读取菜单: {len(menu_rows)} 条记录")
         import_menu(db, menu_rows)
