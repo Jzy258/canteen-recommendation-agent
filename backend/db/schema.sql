@@ -103,7 +103,7 @@ JOIN dish d       ON mi.dish_id = d.id
 ORDER BY m.date, m.meal_time, d.id;
 
 
--- 按天汇总营养摄入（仅已确认记录）
+-- 按天/餐次汇总营养摄入（仅已确认记录）
 CREATE VIEW IF NOT EXISTS v_daily_nutrition AS
 SELECT
     mr.date,
@@ -112,12 +112,28 @@ SELECT
     SUM(d.protein  * mr.portion) AS total_protein,
     SUM(d.carbs    * mr.portion) AS total_carbs,
     SUM(d.fat      * mr.portion) AS total_fat,
-    COUNT(DISTINCT d.id)          AS dish_count
+    COUNT(DISTINCT mr.id)         AS dish_count
 FROM meal_record mr
 JOIN dish d ON mr.dish_id = d.id
 WHERE mr.confirmed = 1
 GROUP BY mr.date, mr.meal_time
 ORDER BY mr.date, mr.meal_time;
+
+
+-- 按天汇总营养摄入（全天合计，仅已确认记录）
+CREATE VIEW IF NOT EXISTS v_day_total AS
+SELECT
+    mr.date,
+    SUM(d.calories * mr.portion) AS total_calories,
+    SUM(d.protein  * mr.portion) AS total_protein,
+    SUM(d.carbs    * mr.portion) AS total_carbs,
+    SUM(d.fat      * mr.portion) AS total_fat,
+    COUNT(DISTINCT mr.id)         AS dish_count
+FROM meal_record mr
+JOIN dish d ON mr.dish_id = d.id
+WHERE mr.confirmed = 1
+GROUP BY mr.date
+ORDER BY mr.date;
 
 
 -- 按周汇总营养摄入（仅已确认记录）
@@ -134,3 +150,22 @@ JOIN dish d ON mr.dish_id = d.id
 WHERE mr.confirmed = 1
 GROUP BY mr.date
 ORDER BY mr.date;
+
+
+-- 按周汇总（周合计 + 日均，仅已确认记录）
+CREATE VIEW IF NOT EXISTS v_week_summary AS
+SELECT
+    strftime('%Y-%W', mr.date)   AS week_key,
+    MIN(mr.date)                 AS start_date,
+    MAX(mr.date)                 AS end_date,
+    SUM(d.calories * mr.portion) AS total_calories,
+    SUM(d.protein  * mr.portion) AS total_protein,
+    SUM(d.carbs    * mr.portion) AS total_carbs,
+    SUM(d.fat      * mr.portion) AS total_fat,
+    COUNT(DISTINCT mr.date)       AS day_count,
+    COUNT(DISTINCT mr.id)         AS dish_count
+FROM meal_record mr
+JOIN dish d ON mr.dish_id = d.id
+WHERE mr.confirmed = 1
+GROUP BY week_key
+ORDER BY week_key;

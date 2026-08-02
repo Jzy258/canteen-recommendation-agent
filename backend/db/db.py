@@ -81,7 +81,19 @@ class DatabaseInterface(ABC):
         ...
 
     @abstractmethod
+    def get_day_total(self, date: str) -> Optional[dict]:
+        ...
+
+    @abstractmethod
     def get_weekly_nutrition(self, start_date: str, end_date: str) -> list[dict]:
+        ...
+
+    @abstractmethod
+    def get_weekly_summary(self, start_date: str, end_date: str) -> Optional[dict]:
+        ...
+
+    @abstractmethod
+    def get_weekly_trend(self, end_date: str = "", days: int = 7) -> list[dict]:
         ...
 
     @abstractmethod
@@ -259,12 +271,72 @@ class SQLiteDatabase(DatabaseInterface):
                 (date,)).fetchall()
         return [dict(r) for r in rows]
 
+    def get_day_total(self, date: str) -> Optional[dict]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM v_day_total WHERE date = ?",
+                (date,)).fetchone()
+        return dict(row) if row else None
+
     def get_weekly_nutrition(self, start_date: str, end_date: str) -> list[dict]:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM v_weekly_nutrition WHERE date BETWEEN ? AND ? ORDER BY date",
                 (start_date, end_date)).fetchall()
         return [dict(r) for r in rows]
+
+    def get_weekly_summary(self, start_date: str, end_date: str) -> Optional[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM v_week_summary WHERE start_date >= ? AND end_date <= ?",
+                (start_date, end_date)).fetchall()
+        result = [dict(r) for r in rows]
+        if not result:
+            return None
+        agg = {
+            "total_calories": sum(r["total_calories"] or 0 for r in result),
+            "total_protein":  sum(r["total_protein"] or 0 for r in result),
+            "total_carbs":    sum(r["total_carbs"] or 0 for r in result),
+            "total_fat":      sum(r["total_fat"] or 0 for r in result),
+            "day_count":      sum(r["day_count"] or 0 for r in result),
+            "dish_count":     sum(r["dish_count"] or 0 for r in result),
+            "week_key":       result[0]["week_key"],
+            "start_date":     result[0]["start_date"],
+            "end_date":       result[-1]["end_date"],
+        }
+        return agg
+
+    def get_weekly_trend(self, end_date: str = "", days: int = 7) -> list[dict]:
+        """返回 [end_date-days+1, end_date] 窗口内每天的营养合计。
+        缺失日期补零，保证连续 days 天的序列，方便前端画趋势图。"""
+        from datetime import date, datetime, timedelta
+
+        if end_date:
+            end = datetime.strptime(end_date, "%Y-%m-%d").date()
+        else:
+            end = date.today()
+        start = end - timedelta(days=days - 1)
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM v_day_total WHERE date BETWEEN ? AND ? ORDER BY date",
+                (start.isoformat(), end.isoformat())).fetchall()
+
+        day_map = {r["date"]: dict(r) for r in rows}
+        trend = []
+        for i in range(days):
+            d = start + timedelta(days=i)
+            dstr = d.isoformat()
+            row = day_map.get(dstr)
+            trend.append({
+                "date": dstr,
+                "total_calories": row["total_calories"] if row else 0,
+                "total_protein":  row["total_protein"] if row else 0,
+                "total_carbs":    row["total_carbs"] if row else 0,
+                "total_fat":      row["total_fat"] if row else 0,
+                "dish_count":     row["dish_count"] if row else 0,
+            })
+        return trend
 
     # ---- user_profile ----
 
