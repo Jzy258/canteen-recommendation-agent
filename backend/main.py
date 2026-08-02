@@ -11,7 +11,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 
 from agent.agent import create_agent_executor
 
-app = FastAPI(title="Canteen Recommendation Agent", version="0.1.0")
+app = FastAPI(title="Canteen Recommendation Agent", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -23,7 +23,9 @@ app.add_middleware(
 
 agent = create_agent_executor()
 
+# session_id -> [HumanMessage / AIMessage, ...]
 sessions: dict[str, list] = {}
+MAX_HISTORY = 20
 
 
 class ChatRequest(BaseModel):
@@ -47,14 +49,21 @@ def chat(req: ChatRequest):
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
     session_id = req.session_id or str(uuid.uuid4())
-    if session_id not in sessions:
-        sessions[session_id] = []
+    history = sessions.setdefault(session_id, [])
 
     try:
-        result = agent.invoke({"messages": [HumanMessage(content=req.message)]})
+        messages = history + [HumanMessage(content=req.message)]
+        result = agent.invoke({"messages": messages})
+        # last message is the final AI reply
         reply = result["messages"][-1].content
     except Exception as e:
         reply = f"Sorry, an error occurred: {str(e)}"
+
+    # persist to memory (trim old turns)
+    history.append(HumanMessage(content=req.message))
+    history.append(AIMessage(content=reply))
+    if len(history) > MAX_HISTORY:
+        sessions[session_id] = history[-MAX_HISTORY:]
 
     return ChatResponse(reply=reply, session_id=session_id)
 
