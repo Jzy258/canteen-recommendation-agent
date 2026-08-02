@@ -2,8 +2,30 @@ from langchain.agents import create_agent
 from llm.client import get_llm
 from tools.search import search_dish, get_all_dishes
 from tools.recommend import recommend_dishes
+from tools.record import (
+    record_meal,
+    confirm_record,
+    reject_record,
+    get_pending_records,
+    get_daily_intake,
+    get_day_total,
+    get_weekly_trend,
+    get_weekly_summary,
+)
 
-tools = [search_dish, get_all_dishes, recommend_dishes]
+tools = [
+    search_dish,
+    get_all_dishes,
+    recommend_dishes,
+    record_meal,
+    confirm_record,
+    reject_record,
+    get_pending_records,
+    get_daily_intake,
+    get_day_total,
+    get_weekly_trend,
+    get_weekly_summary,
+]
 
 SYSTEM_PROMPT = (
     "You are a helpful canteen meal assistant. You help users find dishes "
@@ -11,7 +33,11 @@ SYSTEM_PROMPT = (
     "Use get_all_dishes to list all available dishes. "
     "Use recommend_dishes to recommend dishes based on budget, category preference, "
     "flavor preference, and health goal. "
-    "Always respond in Chinese. When recommending, explain why each dish is recommended."
+    "Use record_meal to record a meal intake, then confirm_record to confirm it. "
+    "Use get_daily_intake / get_day_total to view nutrition by day. "
+    "Use get_weekly_trend / get_weekly_summary to view weekly nutrition trends. "
+    "Always respond in Chinese. When recommending, explain why each dish is recommended. "
+    "When the user confirms recording a meal, first call record_meal then confirm_record."
 )
 
 
