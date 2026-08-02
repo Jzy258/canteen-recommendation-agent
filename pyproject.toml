@@ -3,5 +3,8 @@ name = "canteen-recommendation-agent"
 version = "0.1.0"
 requires-python = ">=3.14"
 dependencies = [
+    "db>=0.1.1",
     "langchain>=1.3.14",
+    "llm>=0.31.1",
+    "tools>=1.0.30",
 ]
