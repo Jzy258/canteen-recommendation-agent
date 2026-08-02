@@ -1,7 +1,8 @@
 # A → B 联调确认：db 接口合约
 
-> 更新日期：2026-08-01
+> 更新日期：2026-08-02
 > B 的 tools/search.py、tools/record.py 通过以下接口访问数据库，无需直接操作 SQLite。
+> 联调状态：record.py 调用模式已由 `tests/A/D3/test_record_integration.py` 模拟验证通过。
 
 ---
 
@@ -44,7 +45,53 @@ results = db.search_dishes(keyword="红烧肉")
 | `get_pending_records()` | 无 | `list[dict]` | 全部待确认记录（含菜品名+营养） |
 | `get_records_by_date(date)` | 日期 | `list[dict]` | 已确认的某天记录 |
 | `get_daily_nutrition(date)` | 日期 | `list[dict]` | 按天+餐次汇总营养（视图 v_daily_nutrition） |
+| `get_day_total(date)` | 日期 | `dict \| None` | 全天营养合计（视图 v_day_total） |
 | `get_weekly_nutrition(start, end)` | 日期范围 | `list[dict]` | 按天汇总营养（视图 v_weekly_nutrition） |
+| `get_weekly_summary(start, end)` | 日期范围 | `dict \| None` | 周营养合计 + 天数/菜品数（视图 v_week_summary） |
+| `get_weekly_trend(end_date, days)` | `end_date` 默认今天，`days` 默认7 | `list[dict]` | 连续 N 天每日营养合计，缺失日期补零（供趋势图） |
+
+### record.py 工具接线示例（已联调验证）
+
+B 的 `tools/record.py` 按 `search.py` 同款模式编写即可：
+
+```python
+from langchain_core.tools import tool
+from db import get_db
+
+db = get_db()
+
+
+@tool
+def record_meal(date: str, meal_time: str, dish_id: int, portion: float = 1.0) -> int:
+    """Record a meal intake (pending confirmation)."""
+    return db.add_meal_record(date, meal_time, dish_id, portion)
+
+
+@tool
+def confirm_record(record_id: int) -> bool:
+    """Confirm a pending meal record."""
+    return db.confirm_meal_record(record_id)
+
+
+@tool
+def get_daily_intake(date: str) -> list[dict]:
+    """Get daily nutrition breakdown by meal_time."""
+    return db.get_daily_nutrition(date)
+
+
+@tool
+def get_day_total(date: str) -> dict:
+    """Get whole-day nutrition total."""
+    return db.get_day_total(date)
+
+
+@tool
+def get_weekly_trend(end_date: str = "", days: int = 7) -> list[dict]:
+    """Get daily nutrition totals for the last N days."""
+    return db.get_weekly_trend(end_date=end_date, days=days)
+```
+
+> 联调确认：`tests/A/D3/test_record_integration.py` 用上述模式模拟 8 个场景全部通过，覆盖「记录→确认→按餐次/全天/周趋势/周汇总」全链路。
 
 ### 用户画像（B 的 store 工具使用）
 

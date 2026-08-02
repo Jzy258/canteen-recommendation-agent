@@ -52,8 +52,9 @@
 | 3.4 | 提供测试数据 | 补充测试数据 | 为 C 的测试提供 3-5 天模拟摄入记录 |
 
 ### 交付物（D3 验收）
-- `db.py` 新增聚合查询函数 ✅
-- 联调通过 ✅
+- `db.py` 新增聚合查询函数 ✅（get_daily_nutrition / get_day_total / get_weekly_nutrition / get_weekly_summary / get_weekly_trend）
+- 联调通过 ✅（tests/A/D3/test_record_integration.py 模拟 record.py 8 场景全通过，接线示例已写入 AB-接口合约）
+- 测试数据 ✅（tests/A/D3/seed_meal_records.csv 5天55条 + load_seed_data.py + README，含每日/周营养参考值）
 
 ---
 
