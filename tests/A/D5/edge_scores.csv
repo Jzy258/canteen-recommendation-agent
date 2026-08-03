@@ -1,0 +1,8 @@
+case,input,expected
+超预算,score_dish(红烧肉 budget=10),S_budget=0.9
+双倍超预算,score_dish(葱爆羊肉15元 budget=10),S_budget=0.75
+无预算,score_dish(红烧肉 budget=0),S_budget=1.0
+无偏好,preference_score(红烧肉 无偏好),0.5
+控油偏好,preference_score(清炒小白菜 控油),0.7
+完美营养,荤菜 350/22/15/20,nutrition_score≈1.0
+减脂荤菜,preference_score(红烧肉 减脂),0.42

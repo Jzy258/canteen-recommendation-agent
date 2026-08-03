@@ -1,0 +1,9 @@
+scenario,input,expected_behavior
+预算过低,recommend(budget=1),返回全部价格<=1的菜品 无报错
+预算为0,recommend(budget=0),无预算约束 返回全部菜品
+无匹配菜品,search_dish(keyword="佛跳墙"),返回空列表 []
+超热量上限,optimize_meal(budget=20 calorie_limit=300),balance_ok=False并给出原因 不崩溃
+热量上限为0,optimize_meal(budget=20 calorie_limit=0),返回空 + reason
+未知菜品ID,record_meal(dish_id=999),外键约束拒绝 IntegrityError
+空偏好,recommend(preferences=""),偏好取中性 正常返回
+极端目标,recommend(health_goals="控油"),素菜得分上升 正常返回
