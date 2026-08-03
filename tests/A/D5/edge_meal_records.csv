@@ -1,0 +1,7 @@
+date,meal_time,dish_id,portion,confirmed
+2026-08-10,lunch,1,0.5,1
+2026-08-10,lunch,37,1,1
+2026-08-10,dinner,17,1,0
+2026-08-11,breakfast,44,1,0
+2026-08-11,lunch,6,1,1
+2026-08-13,dinner,3,1,1

@@ -73,6 +73,23 @@ class DatabaseInterface(ABC):
         ...
 
     @abstractmethod
+    def get_pending_records_by_date(self, date: str,
+                                    meal_time: str = "") -> list[dict]:
+        ...
+
+    @abstractmethod
+    def get_pending_record(self, record_id: int) -> Optional[dict]:
+        ...
+
+    @abstractmethod
+    def confirm_records(self, record_ids: list[int]) -> int:
+        ...
+
+    @abstractmethod
+    def reject_records(self, record_ids: list[int]) -> int:
+        ...
+
+    @abstractmethod
     def get_records_by_date(self, date: str) -> list[dict]:
         ...
 
@@ -236,7 +253,10 @@ class SQLiteDatabase(DatabaseInterface):
             cur = conn.execute(
                 "UPDATE meal_record SET confirmed = 1 WHERE id = ? AND confirmed = 0",
                 (record_id,))
-            return cur.rowcount > 0
+            ok = cur.rowcount > 0
+        if ok:
+            self._refresh_profile_summary()
+        return ok
 
     def reject_meal_record(self, record_id: int) -> bool:
         with self._connect() as conn:
@@ -244,6 +264,33 @@ class SQLiteDatabase(DatabaseInterface):
                 "UPDATE meal_record SET confirmed = -1 WHERE id = ? AND confirmed = 0",
                 (record_id,))
             return cur.rowcount > 0
+
+    def confirm_records(self, record_ids: list[int]) -> int:
+        """批量确认，返回实际确认条数。"""
+        if not record_ids:
+            return 0
+        placeholders = ",".join("?" * len(record_ids))
+        with self._connect() as conn:
+            cur = conn.execute(
+                f"UPDATE meal_record SET confirmed = 1 "
+                f"WHERE id IN ({placeholders}) AND confirmed = 0",
+                record_ids)
+            n = cur.rowcount
+        if n > 0:
+            self._refresh_profile_summary()
+        return n
+
+    def reject_records(self, record_ids: list[int]) -> int:
+        """批量拒绝，返回实际拒绝条数。"""
+        if not record_ids:
+            return 0
+        placeholders = ",".join("?" * len(record_ids))
+        with self._connect() as conn:
+            cur = conn.execute(
+                f"UPDATE meal_record SET confirmed = -1 "
+                f"WHERE id IN ({placeholders}) AND confirmed = 0",
+                record_ids)
+            return cur.rowcount
 
     def get_pending_records(self) -> list[dict]:
         with self._connect() as conn:
@@ -253,6 +300,94 @@ class SQLiteDatabase(DatabaseInterface):
                    WHERE mr.confirmed = 0
                    ORDER BY mr.date, mr.meal_time""").fetchall()
         return [dict(r) for r in rows]
+
+    def get_pending_records_by_date(self, date: str,
+                                    meal_time: str = "") -> list[dict]:
+        sql = """SELECT mr.*, d.name AS dish_name, d.calories, d.protein, d.carbs, d.fat
+                 FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
+                 WHERE mr.confirmed = 0 AND mr.date = ?"""
+        params: list = [date]
+        if meal_time:
+            sql += " AND mr.meal_time = ?"
+            params.append(meal_time)
+        sql += " ORDER BY mr.meal_time, mr.id"
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_pending_record(self, record_id: int) -> Optional[dict]:
+        with self._connect() as conn:
+            row = conn.execute(
+                """SELECT mr.*, d.name AS dish_name, d.calories, d.protein, d.carbs, d.fat
+                   FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
+                   WHERE mr.id = ? AND mr.confirmed = 0""",
+                (record_id,)).fetchone()
+        return dict(row) if row else None
+
+    def _refresh_profile_summary(self):
+        """确认记录后，重算已确认记录的历史营养汇总并写入 user_profile。
+        汇总内容：总摄入、日均营养、按餐次平均、菜品多样性、近7天趋势。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                """SELECT
+                       COUNT(*) AS record_count,
+                       COUNT(DISTINCT date) AS day_count,
+                       COUNT(DISTINCT d.id) AS dish_kind_count,
+                       ROUND(SUM(d.calories * mr.portion), 1) AS total_calories,
+                       ROUND(SUM(d.protein * mr.portion), 1) AS total_protein,
+                       ROUND(SUM(d.carbs * mr.portion), 1) AS total_carbs,
+                       ROUND(SUM(d.fat * mr.portion), 1) AS total_fat
+                   FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
+                   WHERE mr.confirmed = 1""").fetchone()
+
+        if not row or row["record_count"] == 0:
+            summary = {}
+        else:
+            days = row["day_count"] or 1
+            summary = {
+                "record_count": row["record_count"],
+                "day_count": row["day_count"],
+                "dish_kind_count": row["dish_kind_count"],
+                "total_calories": row["total_calories"],
+                "total_protein": row["total_protein"],
+                "total_carbs": row["total_carbs"],
+                "total_fat": row["total_fat"],
+                "avg_calories": round(row["total_calories"] / days, 1),
+                "avg_protein": round(row["total_protein"] / days, 1),
+                "avg_carbs": round(row["total_carbs"] / days, 1),
+                "avg_fat": round(row["total_fat"] / days, 1),
+            }
+            summary["meal_averages"] = self._meal_averages()
+            summary["recent_trend"] = self._recent_trend()
+
+        import json
+        if self.get_user_profile() is None:
+            self.upsert_user_profile()
+        self.update_nutrition_summary(json.dumps(summary, ensure_ascii=False))
+
+    def _meal_averages(self) -> dict:
+        """按餐次统计平均摄入。"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT mr.meal_time,
+                          ROUND(SUM(d.calories * mr.portion) / COUNT(DISTINCT mr.date), 1) AS avg_calories
+                   FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
+                   WHERE mr.confirmed = 1
+                   GROUP BY mr.meal_time""").fetchall()
+        return {r["meal_time"]: r["avg_calories"] for r in rows}
+
+    def _recent_trend(self, days: int = 7) -> list[dict]:
+        """最近 N 天每日热量摄入（仅含实际有记录的天）。"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT mr.date,
+                          ROUND(SUM(d.calories * mr.portion), 1) AS calories
+                   FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
+                   WHERE mr.confirmed = 1
+                   GROUP BY mr.date
+                   ORDER BY mr.date DESC LIMIT ?""",
+                (days,)).fetchall()
+        return [dict(r) for r in reversed(rows)]
 
     def get_records_by_date(self, date: str) -> list[dict]:
         with self._connect() as conn:

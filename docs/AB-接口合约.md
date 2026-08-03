@@ -40,15 +40,28 @@ results = db.search_dishes(keyword="红烧肉")
 | 接口 | 参数 | 返回 | 说明 |
 |------|------|------|------|
 | `add_meal_record(date, meal_time, dish_id, portion)` | 必填 | `int` (record_id) | 新增待确认记录 |
-| `confirm_meal_record(record_id)` | `int` | `bool` | 用户确认 → `confirmed=1` |
+| `confirm_meal_record(record_id)` | `int` | `bool` | 用户确认 → `confirmed=1`，并刷新 user_profile 营养汇总 |
 | `reject_meal_record(record_id)` | `int` | `bool` | 用户拒绝 → `confirmed=-1` |
+| `confirm_records(record_ids)` | `list[int]` | `int` | 批量确认，返回实际确认条数 |
+| `reject_records(record_ids)` | `list[int]` | `int` | 批量拒绝，返回实际拒绝条数 |
 | `get_pending_records()` | 无 | `list[dict]` | 全部待确认记录（含菜品名+营养） |
+| `get_pending_records_by_date(date, meal_time)` | 日期，餐次可选 | `list[dict]` | 按日期/日期+餐次过滤待确认记录 |
+| `get_pending_record(record_id)` | `int` | `dict \| None` | 查询单条待确认记录 |
 | `get_records_by_date(date)` | 日期 | `list[dict]` | 已确认的某天记录 |
 | `get_daily_nutrition(date)` | 日期 | `list[dict]` | 按天+餐次汇总营养（视图 v_daily_nutrition） |
 | `get_day_total(date)` | 日期 | `dict \| None` | 全天营养合计（视图 v_day_total） |
 | `get_weekly_nutrition(start, end)` | 日期范围 | `list[dict]` | 按天汇总营养（视图 v_weekly_nutrition） |
 | `get_weekly_summary(start, end)` | 日期范围 | `dict \| None` | 周营养合计 + 天数/菜品数（视图 v_week_summary） |
 | `get_weekly_trend(end_date, days)` | `end_date` 默认今天，`days` 默认7 | `list[dict]` | 连续 N 天每日营养合计，缺失日期补零（供趋势图） |
+
+> **HITL 流程**：`add_meal_record` 写入 `confirmed=0`（待确认）→ 展示给用户 →
+> `confirm_records`/`reject_records` 批量审批 → 确认后自动刷新 `user_profile.nutrition_summary`
+> （供 Store 长期记忆）。测试：`tests/A/D5/test_all.py` 全部通过。
+>
+> **联调状态（B 审批流）**：B 的 `tools/record.py` + `agent.py` 已注册
+> `record_meal`/`confirm_record`/`reject_record`/`get_pending_records`/`get_daily_intake` 等工具。
+> `tests/A/D5/test_hitl_integration.py` 按 B 的调用模式模拟完整审批流全部通过：
+> 记录 → 待确认展示 → 确认/拒绝 → 营养聚合（被拒记录不计入）→ user_profile 汇总刷新。
 
 ### record.py 工具接线示例（已联调验证）
 
