@@ -86,6 +86,13 @@ def metrics():
     return get_metrics()
 
 
+@app.get("/trend")
+def trend(days: int = 7, end_date: str = ""):
+    """营养摄入趋势：连续 N 天每日营养合计（缺失日期补零），供前端趋势图。"""
+    from db import get_db
+    return get_db().get_weekly_trend(end_date=end_date, days=days)
+
+
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
     if not req.message or not req.message.strip():
