@@ -144,6 +144,24 @@ try:
     assert len(result2) == 5
     print("  [PASS] recommend 默认参数(budget=20)可用")
 
+    # ============================================================
+    print("\n" + "=" * 50)
+    print("8. recommend 合并已存画像")
+    print("=" * 50)
+    # 先设置已存画像：清淡偏好
+    _db_test.upsert_user_profile(budget=15, flavor_preferences="清淡")
+    # 不传 preferences/health_goals，应回落到已存画像的"清淡"
+    r_default = recommend.invoke({"budget": 15})
+    top_default = [d["name"] for d in r_default[:5]]
+    # 传显式 preferences 应覆盖已存画像
+    r_explicit = recommend.invoke({"budget": 15, "preferences": "辣"})
+    top_explicit = [d["name"] for d in r_explicit[:5]]
+    # 清淡偏好的推荐应与辣偏好不同（至少一个差异）
+    assert top_default != top_explicit, "显式偏好应覆盖已存画像导致推荐变化"
+    print(f"  [PASS] 清淡画像推荐: {top_default[:3]}")
+    print(f"  [PASS] 显式辣偏好推荐: {top_explicit[:3]}")
+    print("  [PASS] recommend 已存画像回落 + 显式参数覆盖")
+
     print("\n" + "=" * 50)
     print("全部验证通过")
     print("=" * 50)

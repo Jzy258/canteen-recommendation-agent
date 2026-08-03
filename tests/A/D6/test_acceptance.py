@@ -82,24 +82,26 @@ try:
     check("返回字段含营养", all("name" in d and "calories" in d and "price" in d for d in cold_res))
 
     print("\n" + "=" * 55)
-    print("交付物 3: 联调通过（天气推荐 @tool）")
+    print("交付物 3: 联调通过（B 天气 MCP 调用 A 的查询）")
     print("=" * 55)
     backend_dir = os.path.join(_PROJECT_ROOT, "backend")
     if backend_dir not in sys.path:
         sys.path.insert(0, backend_dir)
-    from tools.weather import recommend_by_weather
-    r = recommend_by_weather.invoke({"weather_type": "cold", "top_k": 3})
-    check("@tool 返回3道", len(r) == 3 and all("name" in d for d in r))
-    check("天冷返回含汤", any("汤" in d["name"] for d in r))
-    r_hot = recommend_by_weather.invoke({"weather_type": "hot"})
-    check("@tool 默认 top_k=5", len(r_hot) == 5)
-    r_rain = recommend_by_weather.invoke({"weather_type": "rainy"})
-    check("未知天气 @tool 返回空", r_rain == [])
+
+    # A 不再提供天气 @tool（避免与 B 的工具重复）
+    check("A 无重复天气 @tool", not os.path.exists(
+        os.path.join(_PROJECT_ROOT, "backend", "tools", "weather.py")))
 
     # B 天气 MCP 联动（get_weather_recommendation 调用 A 的 get_dishes_by_weather_tag）
     from mcp.weather_tool import get_weather_recommendation
     msg = get_weather_recommendation.invoke({"city": "北京"})
     check("B MCP 天气工具联动 A 查询", isinstance(msg, str) and "°C" in msg and "推荐方向" in msg)
+    # 冷/热推荐方向映射正确
+    from mcp.weather_data import weather_to_dish_type
+    check("冷→热汤面", "热汤" in weather_to_dish_type("cold"))
+    check("热→清淡", "清淡" in weather_to_dish_type("hot"))
+    # 联动返回候选菜品来自 A 的映射
+    check("联动返回含候选菜", "候选菜品" in msg or "暂无" in msg)
 
     # 天气融入常规推荐（评分联动）
     tools_dir = os.path.join(_PROJECT_ROOT, "backend", "tools")

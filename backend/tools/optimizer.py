@@ -41,9 +41,16 @@ def optimize_meal(dishes: list[dict], budget: float, calorie_limit: float,
         dict: 含 dishes（选中菜品）、total_price、total_calories、
               total_protein、categories、balance_ok、reason
     """
+    try:
+        budget = float(budget)
+        calorie_limit = float(calorie_limit)
+    except (TypeError, ValueError):
+        return _empty_result("预算或热量上限必须是数值")
+
     if budget <= 0 or calorie_limit <= 0:
         return _empty_result("预算或热量上限必须大于 0")
 
+    dishes = dishes or []
     candidates = [
         d for d in dishes
         if _as_float(d, "price") <= budget + 1e-6
@@ -99,16 +106,18 @@ def optimize_meal(dishes: list[dict], budget: float, calorie_limit: float,
 
     # 荤素搭配修正
     selected, balance_ok, reason = _ensure_balance(selected, candidates,
-                                                   budget, calorie_limit)
+                                                   budget, calorie_limit,
+                                                   user_profile)
 
     return _build_result(selected, budget, calorie_limit, balance_ok, reason)
 
 
 def _ensure_balance(selected: list[dict], candidates: list[dict],
-                    budget: float, calorie_limit: float) -> tuple:
+                    budget: float, calorie_limit: float,
+                    user_profile: Optional[dict] = None) -> tuple:
     """确保 1 荤 + 1 素 + 1 主食；缺类别时尝试补足/替换。
     策略：先尝试直接补足；若空间不够，尝试移除 1~2 道后再补足，
-    取补足后蛋白质总量最高的可行方案。"""
+    取补足后（融合偏好的评分）最高的可行方案。"""
     from itertools import combinations
 
     required = set(REQUIRED_CATEGORIES)
@@ -122,35 +131,56 @@ def _ensure_balance(selected: list[dict], candidates: list[dict],
                 sum(_as_float(d, "calories") for d in sels),
                 sum(_as_float(d, "protein") for d in sels))
 
+    def dish_value(d: dict) -> float:
+        """补足时选择该菜的价值：有画像用评分（含偏好），否则蛋白质。"""
+        if user_profile:
+            try:
+                # 兼容两种运行环境：backend 在 sys.path（tools.scoring）或 tools 目录在 path（scoring）
+                from tools.scoring import score_dish
+            except ImportError:
+                try:
+                    from scoring import score_dish
+                except ImportError:
+                    score_dish = None
+            if score_dish is not None:
+                try:
+                    return score_dish(d, user_profile, budget=budget)["score"]
+                except Exception:
+                    pass
+        return _as_float(d, "protein")
+
     def try_fill(cur: list[dict]) -> tuple:
-        """尝试补足缺失类别（贪心取蛋白质最高的可行菜），返回 (结果, 是否补齐)。"""
+        """尝试补足缺失类别（贪心选评分/蛋白质最高的可行菜），返回 (结果, 是否补齐)。"""
         cur = list(cur)
         while missing_cats(cur):
             m = missing_cats(cur)[0]
             cur_price, cur_cal, _ = total_metrics(cur)
             best_d = None
+            best_val = -1.0
             for d in candidates:
                 if d.get("category") != m:
                     continue
                 if (_as_float(d, "price") <= budget - cur_price + 1e-6
                         and _as_float(d, "calories") <= calorie_limit - cur_cal + 1e-6):
-                    if best_d is None or _as_float(d, "protein") > _as_float(best_d, "protein"):
+                    val = dish_value(d)
+                    if val > best_val:
+                        best_val = val
                         best_d = d
             if best_d is None:
                 break
             cur.append(best_d)
         return cur, (not missing_cats(cur))
 
-    # 尝试删除 0/1/2 道后补足
-    best_solution, best_prot = None, -1.0
+    # 尝试删除 0/1/2 道后补足，比较时用评分（含偏好）或蛋白质
+    best_solution, best_val = None, -1.0
     for remove_count in range(0, 3):
         for removed in combinations(range(len(selected)), remove_count):
             base = [selected[i] for i in range(len(selected)) if i not in removed]
             filled, ok = try_fill(base)
             if ok:
-                _, _, prot = total_metrics(filled)
-                if prot > best_prot:
-                    best_prot = prot
+                val = sum(dish_value(d) for d in filled)
+                if val > best_val:
+                    best_val = val
                     best_solution = filled
     if best_solution:
         return best_solution, True, "荤素搭配合理（已补足）"
@@ -204,9 +234,17 @@ def optimize_meal_tool(budget: float, calorie_limit: float,
     Args:
         budget: 预算（元/餐）
         calorie_limit: 热量上限（kcal）
-        preferences: 口味偏好（逗号分隔），可选
+        preferences: 口味偏好（逗号分隔），可选；不传时使用已保存的用户画像。
     """
     from db import get_db
 
-    dishes = get_db().get_all_dishes()
-    return optimize_meal(dishes, budget, calorie_limit)
+    db = get_db()
+    saved = db.get_user_profile() or {}
+    effective_prefs = preferences if preferences else saved.get("flavor_preferences", "")
+    user_profile = {
+        "budget": float(budget),
+        "flavor_preferences": effective_prefs,
+        "health_goals": saved.get("health_goals", ""),
+    }
+    dishes = db.get_all_dishes()
+    return optimize_meal(dishes, budget, calorie_limit, user_profile=user_profile)

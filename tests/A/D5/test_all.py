@@ -176,6 +176,28 @@ try:
     print(f"  [PASS] 多日汇总: record_count=4, day_count=2, avg=670, "
           f"meal_averages={summary['meal_averages']}, trend={summary['recent_trend']}")
 
+    # ============================================================
+    print("\n" + "=" * 50)
+    print("10. 部分更新保留旧值（upsert 非空覆盖）")
+    print("=" * 50)
+    # 初始画像: budget=20, flavor_preferences=清淡, health_goals=减脂
+    db.upsert_user_profile(budget=20, flavor_preferences="清淡", health_goals="减脂")
+    p0 = db.get_user_profile()
+    assert p0["flavor_preferences"] == "清淡" and p0["health_goals"] == "减脂"
+    # 只更新 budget，其余字段应保留
+    db.upsert_user_profile(budget=30)
+    p1 = db.get_user_profile()
+    assert p1["budget"] == 30.0, f"预算应更新为30: {p1}"
+    assert p1["flavor_preferences"] == "清淡", f"口味应保留: {p1}"
+    assert p1["health_goals"] == "减脂", f"健康目标应保留: {p1}"
+    # 只更新 health_goals，budget/口味保留
+    db.upsert_user_profile(health_goals="控油")
+    p2 = db.get_user_profile()
+    assert p2["health_goals"] == "控油"
+    assert p2["budget"] == 30.0 and p2["flavor_preferences"] == "清淡"
+    print(f"  [PASS] 部分更新保留旧值: budget=30, 偏好保留清淡/控油")
+    print(f"  [PASS] upsert 覆盖式更新已修复（不再丢字段）")
+
     print("\n" + "=" * 50)
     print("全部验证通过")
     print("=" * 50)

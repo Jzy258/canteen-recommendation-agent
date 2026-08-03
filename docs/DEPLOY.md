@@ -44,6 +44,10 @@ cd backend
 uv sync
 uv run python main.py
 
+# 初始化数据库（建表 + 导入菜品/菜单数据，首次必须执行）
+# 已在 backend 目录下，故用 data/init_db.py
+uv run python data/init_db.py
+
 # Ollama（需本机安装 ollama）
 ollama serve
 ollama pull qwen2.5:7b
@@ -51,6 +55,9 @@ ollama pull qwen2.5:7b
 # 天气 MCP（可选独立进程）
 uv run python backend/mcp/weather_server.py
 ```
+
+> 数据库初始化说明（A 拥有）：`init_db.py` 执行 `db/schema.sql` 建表，
+> 并从 `dishes.csv`（54 道菜）、`menu.csv`（5天×3餐）灌入数据，幂等可重复执行。
 
 ## 4. 常见坑
 

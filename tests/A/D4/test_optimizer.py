@@ -109,6 +109,23 @@ try:
     print(f"  [PASS] @tool 返回 {len(r5['dishes'])} 道菜, 蛋白质{r5['total_protein']}g")
     print(f"  [PASS] 返回结构含: {sorted(r5.keys())}")
 
+    # ============================================================
+    print("\n" + "=" * 50)
+    print("8. @tool preferences 生效（偏好影响补足选择）")
+    print("=" * 50)
+    r_light = optimize_meal_tool.invoke({"budget": 20, "calorie_limit": 800,
+                                         "preferences": "清淡"})
+    r_spicy = optimize_meal_tool.invoke({"budget": 20, "calorie_limit": 800,
+                                         "preferences": "辣"})
+    assert r_light["balance_ok"] and r_spicy["balance_ok"]
+    names_light = [d["name"] for d in r_light["dishes"]]
+    names_spicy = [d["name"] for d in r_spicy["dishes"]]
+    # 偏好应导致补足菜品不同（清淡偏素菜 vs 辣偏重口）
+    assert names_light != names_spicy, f"偏好应影响搭配: {names_light} vs {names_spicy}"
+    print(f"  [PASS] 清淡偏好搭配: {names_light}")
+    print(f"  [PASS] 辣偏好搭配: {names_spicy}")
+    print("  [PASS] optimize_meal_tool 的 preferences 已生效")
+
     print("\n" + "=" * 50)
     print("全部验证通过")
     print("=" * 50)
