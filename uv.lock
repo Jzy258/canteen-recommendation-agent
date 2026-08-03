@@ -37,6 +37,7 @@ dependencies = [
     { name = "db" },
     { name = "langchain" },
     { name = "llm" },
+    { name = "optimizer" },
     { name = "tools" },
 ]
 
@@ -45,6 +46,7 @@ requires-dist = [
     { name = "db", specifier = ">=0.1.1" },
     { name = "langchain", specifier = ">=1.3.14" },
     { name = "llm", specifier = ">=0.31.1" },
+    { name = "optimizer", specifier = ">=0.1.0" },
     { name = "tools", specifier = ">=1.0.30" },
 ]
 
@@ -427,6 +429,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/bb/5a/c45fa035cd72c70ebe67c6e079e3adf871492382634f69e3dff62c43597d/openai-2.52.0.tar.gz", hash = "sha256:7c736d592f81471ce1f734838390983c4d8c8aecff23dcd36e600a58e5032d9c", size = 1098876, upload-time = "2026-07-31T15:13:03.228Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a1/ac/ceb40c995df49533ad4dcff6c37f0d85cf14446a212363fc9d2f927e60b4/openai-2.52.0-py3-none-any.whl", hash = "sha256:f97e231d9a8fa69ab55897df1080f02d99913fb0a30e3ee56ea16a1eb6c2d434", size = 1659569, upload-time = "2026-07-31T15:13:01.145Z" },
+]
+
+[[package]]
+name = "optimizer"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/39/16/e9d0d4fe9444934ad868ef62ea7175a60257e60df9fc26255186784e9a3f/optimizer-0.1.0.tar.gz", hash = "sha256:4cb090e865a6f2b926552c296c91f6b78f0d970cd0935725a30453ef593c4c3f", size = 687, upload-time = "2023-08-26T01:08:02.946Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5e/06/fcc723dcdf39ee2e89680b749f4f6d5908bffbbc2e83d8c859e32a7d7467/optimizer-0.1.0-py3-none-any.whl", hash = "sha256:dcccaa43591836b9301004884100ff0f3baf59cfe92cd86e1fd60ae9bd838abc", size = 1113, upload-time = "2023-08-26T01:08:01.274Z" },
 ]
 
 [[package]]

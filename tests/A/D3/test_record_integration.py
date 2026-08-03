@@ -69,7 +69,8 @@ try:
     real_db = SQLiteDatabase(tmp_db)
     real_db.init_db()
 
-    # 用真实实现替换单例指向临时库，隔离测试
+    # 将模块级 db 变量重绑定到临时库（工具引用的是该变量），并同步单例
+    db = real_db
     import db as db_module
     db_module._db_instance = real_db
 
