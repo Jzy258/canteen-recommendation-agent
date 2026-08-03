@@ -1,3 +1,5 @@
+import asyncio
+import json
 import os
 import uuid
 from dotenv import load_dotenv
@@ -6,13 +8,14 @@ load_dotenv()
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage, AIMessage
 
 from agent.agent import create_agent_executor
 from middleware import RequestMetricsMiddleware, add_tokens, get_metrics
 
-app = FastAPI(title="Canteen Recommendation Agent", version="0.3.0")
+app = FastAPI(title="Canteen Recommendation Agent", version="0.4.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -78,6 +81,48 @@ def chat(req: ChatRequest):
         sessions[session_id] = history[-MAX_HISTORY:]
 
     return ChatResponse(reply=reply, session_id=session_id)
+
+
+def _stream_reply(session_id: str, message: str):
+    """流式生成回复，按字符切块 SSE 输出。"""
+    history = sessions.setdefault(session_id, [])
+    try:
+        messages = history + [HumanMessage(content=message)]
+        result = agent.invoke({"messages": messages})
+        reply = result["messages"][-1].content
+        add_tokens(len(message) + len(reply))
+    except Exception as e:
+        reply = f"Sorry, an error occurred: {str(e)}"
+
+    history.append(HumanMessage(content=message))
+    history.append(AIMessage(content=reply))
+    if len(history) > MAX_HISTORY:
+        sessions[session_id] = history[-MAX_HISTORY:]
+
+    async def gen():
+        # 先发 session 元数据
+        yield f"data: {json.dumps({'type': 'session', 'session_id': session_id}, ensure_ascii=False)}\n\n"
+        chunk_size = 4
+        for i in range(0, len(reply), chunk_size):
+            piece = reply[i:i + chunk_size]
+            yield f"data: {json.dumps({'type': 'delta', 'content': piece}, ensure_ascii=False)}\n\n"
+            await asyncio.sleep(0.01)
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/chat/stream")
+def chat_stream(req: ChatRequest):
+    """流式对话：SSE 输出，先 session 元数据，再 content 增量，最后 done。"""
+    if not req.message or not req.message.strip():
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+    session_id = req.session_id or str(uuid.uuid4())
+    return _stream_reply(session_id, req.message)
 
 
 if __name__ == "__main__":
