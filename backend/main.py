@@ -1,8 +1,11 @@
 import asyncio
 import json
+import logging
 import os
 import uuid
 from dotenv import load_dotenv
+
+logger = logging.getLogger("canteen.agent")
 
 load_dotenv()
 
@@ -72,7 +75,8 @@ def chat(req: ChatRequest):
         out_tokens = len(reply) if reply else 0
         add_tokens(in_tokens + out_tokens)
     except Exception as e:
-        reply = f"Sorry, an error occurred: {str(e)}"
+        logger.exception("chat failed: %s", e)
+        reply = "抱歉，系统处理出错，请稍后再试或换一种问法。"
 
     # persist to memory (trim old turns)
     history.append(HumanMessage(content=req.message))
@@ -92,7 +96,8 @@ def _stream_reply(session_id: str, message: str):
         reply = result["messages"][-1].content
         add_tokens(len(message) + len(reply))
     except Exception as e:
-        reply = f"Sorry, an error occurred: {str(e)}"
+        logger.exception("chat stream failed: %s", e)
+        reply = "抱歉，系统处理出错，请稍后再试或换一种问法。"
 
     history.append(HumanMessage(content=message))
     history.append(AIMessage(content=reply))

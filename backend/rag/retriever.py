@@ -12,6 +12,7 @@
 """
 import math
 import os
+import zlib
 
 from langchain_core.tools import tool
 from langchain_core.embeddings import Embeddings
@@ -60,7 +61,9 @@ class DeterministicEmbeddings(Embeddings):
     def _build(self, text: str) -> list[float]:
         vec = [0.0] * self._dim
         for f in _tokenize(text):
-            idx = abs(hash(f)) % self._dim
+            # 用 zlib.crc32 确定性哈希（Python 内置 hash() 受 PYTHONHASHSEED 影响，
+            # 跨进程不一致会导致 Chroma 持久化索引在重启后失效）
+            idx = zlib.crc32(f.encode("utf-8")) % self._dim
             vec[idx] += 1.0
         # 归一化
         norm = math.sqrt(sum(x * x for x in vec))
