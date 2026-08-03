@@ -6,6 +6,9 @@ load_dotenv()
 
 def get_llm():
     api_key = os.getenv("OPENAI_API_KEY")
+    timeout = int(os.getenv("LLM_TIMEOUT", "60"))
+    max_retries = int(os.getenv("LLM_MAX_RETRIES", "2"))
+
     if api_key:
         from langchain_openai import ChatOpenAI
         return ChatOpenAI(
@@ -13,6 +16,8 @@ def get_llm():
             api_key=api_key,
             base_url=os.getenv("OPENAI_BASE_URL"),
             temperature=0.3,
+            timeout=timeout,
+            max_retries=max_retries,
         )
 
     base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
@@ -20,7 +25,13 @@ def get_llm():
 
     try:
         from langchain_ollama import ChatOllama
-        return ChatOllama(base_url=base_url, model=model, temperature=0.3)
+        return ChatOllama(
+            base_url=base_url,
+            model=model,
+            temperature=0.3,
+            timeout=timeout,
+            max_retries=max_retries,
+        )
     except Exception:
         pass
 

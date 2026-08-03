@@ -21,6 +21,7 @@ _stats = {
 }
 
 _STATS_FILE = os.getenv("METRICS_FILE", "backend/data/metrics.json")
+_MAX_TOKEN_HISTORY = 1000  # 内存中保留的 token 记录条数上限
 
 
 def _persist():
@@ -49,6 +50,9 @@ def add_tokens(count: int):
         "time": datetime.now().isoformat(timespec="seconds"),
         "tokens": count,
     })
+    # 限制历史条数，防止内存无限增长
+    if len(_stats["token_history"]) > _MAX_TOKEN_HISTORY:
+        _stats["token_history"] = _stats["token_history"][-_MAX_TOKEN_HISTORY:]
     _persist()
 
 
