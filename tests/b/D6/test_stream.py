@@ -17,8 +17,9 @@ class FakeAgent:
 
 def build_client():
     import main as main_mod
+    from agent.session import session_store
     main_mod.agent = FakeAgent()
-    main_mod.sessions = {}
+    session_store.clear_all()
     return TestClient(main_mod.app)
 
 

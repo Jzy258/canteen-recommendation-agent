@@ -16,9 +16,11 @@ from pydantic import BaseModel
 from langchain_core.messages import HumanMessage, AIMessage
 
 from agent.agent import create_agent_executor
+from agent.session import session_store
 from middleware import RequestMetricsMiddleware, add_tokens, get_metrics, count_tokens, count_messages
+from version import APP_NAME, VERSION
 
-app = FastAPI(title="Canteen Recommendation Agent", version="0.4.0")
+app = FastAPI(title=APP_NAME, version=VERSION)
 
 app.add_middleware(
     CORSMiddleware,
@@ -31,9 +33,7 @@ app.add_middleware(RequestMetricsMiddleware)
 
 agent = create_agent_executor()
 
-# session_id -> [HumanMessage / AIMessage, ...]
-sessions: dict[str, list] = {}
-MAX_HISTORY = 20
+# 会话管理（线程安全 + TTL 过期 + 数量上限）由 SessionStore 承担
 
 
 class ChatRequest(BaseModel):
@@ -63,7 +63,7 @@ def chat(req: ChatRequest):
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
     session_id = req.session_id or str(uuid.uuid4())
-    history = sessions.setdefault(session_id, [])
+    history = session_store.get(session_id)
 
     try:
         messages = history + [HumanMessage(content=req.message)]
@@ -79,17 +79,14 @@ def chat(req: ChatRequest):
         reply = "抱歉，系统处理出错，请稍后再试或换一种问法。"
 
     # persist to memory (trim old turns)
-    history.append(HumanMessage(content=req.message))
-    history.append(AIMessage(content=reply))
-    if len(history) > MAX_HISTORY:
-        sessions[session_id] = history[-MAX_HISTORY:]
+    session_store.append(session_id, req.message, reply)
 
     return ChatResponse(reply=reply, session_id=session_id)
 
 
 def _stream_reply(session_id: str, message: str):
     """流式生成回复，按字符切块 SSE 输出。"""
-    history = sessions.setdefault(session_id, [])
+    history = session_store.get(session_id)
     try:
         messages = history + [HumanMessage(content=message)]
         result = agent.invoke({"messages": messages})
@@ -99,10 +96,7 @@ def _stream_reply(session_id: str, message: str):
         logger.exception("chat stream failed: %s", e)
         reply = "抱歉，系统处理出错，请稍后再试或换一种问法。"
 
-    history.append(HumanMessage(content=message))
-    history.append(AIMessage(content=reply))
-    if len(history) > MAX_HISTORY:
-        sessions[session_id] = history[-MAX_HISTORY:]
+    session_store.append(session_id, message, reply)
 
     async def gen():
         # 先发 session 元数据
