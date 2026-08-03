@@ -1,12 +1,10 @@
 {
-  "requests": 18,
+  "requests": 1,
   "errors": 0,
-  "total_time_ms": 33108.86,
+  "total_time_ms": 19.98,
   "total_tokens": 0,
   "by_path": {
-    "/health": 6,
-    "/chat": 11,
-    "/chat/stream": 1
+    "/trend": 1
   },
-  "updated_at": "2026-08-03T15:58:12"
+  "updated_at": "2026-08-03T16:04:52"
 }

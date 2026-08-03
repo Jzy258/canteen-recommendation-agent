@@ -2,9 +2,10 @@
 import { nextTick, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { chat, chatStream } from '@/api/chat'
-import type { ChatMessage } from '@/types/chat'
+import type { ChatMessage, UserProfile } from '@/types/chat'
 
 const SESSION_KEY = 'canteen.session_id'
+const PROFILE_KEY = 'canteen.profile'
 
 const messages = ref<ChatMessage[]>([])
 const input = ref('')
@@ -19,6 +20,26 @@ function getSessionId(): string {
 
 function saveSessionId(id: string): void {
   localStorage.setItem(SESSION_KEY, id)
+}
+
+function loadProfile(): UserProfile | null {
+  const raw = localStorage.getItem(PROFILE_KEY)
+  if (!raw) return null
+  try {
+    return JSON.parse(raw) as UserProfile
+  } catch {
+    return null
+  }
+}
+
+function buildPrompt(text: string): string {
+  const p = loadProfile()
+  if (!p) return text
+  const parts: string[] = []
+  if (p.budget > 0) parts.push(`预算${p.budget}元`)
+  if (p.flavor_preferences) parts.push(`口味偏好${p.flavor_preferences}`)
+  if (p.health_goals) parts.push(`目标${p.health_goals}`)
+  return parts.length > 0 ? `（用户偏好：${parts.join('，')}）${text}` : text
 }
 
 function scrollToBottom(): void {
@@ -47,11 +68,12 @@ function appendAssistant(text: string): void {
 
 async function sendByStream(text: string): Promise<'ok' | 'aborted' | 'failed'> {
   const sid = getSessionId() || undefined
+  const prompt = buildPrompt(text)
   abortController = new AbortController()
   let succeeded = false
   try {
     await chatStream(
-      { message: text, session_id: sid },
+      { message: prompt, session_id: sid },
       (event) => {
         if (event.type === 'session') {
           saveSessionId(event.session_id)
@@ -107,7 +129,7 @@ async function send(): Promise<void> {
   // 流式失败：回退到非流式 /chat
   if (status === 'failed') {
     try {
-      const res = await chat({ message: text, session_id: getSessionId() || undefined })
+      const res = await chat({ message: buildPrompt(text), session_id: getSessionId() || undefined })
       saveSessionId(res.session_id)
       currentAssistant().content = res.reply
       status = 'ok'
@@ -203,11 +225,13 @@ function onEnter(): void {
 .chat-page {
   max-width: 860px;
   margin: 0 auto;
-  height: 100vh;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
   padding: 16px;
+  width: 100%;
 }
 
 .chat-card {

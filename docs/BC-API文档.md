@@ -27,6 +27,7 @@
 | GET | `/metrics` | 中间件统计（请求数/耗时/Token） |
 | POST | `/chat` | 对话（普通 JSON 返回） |
 | POST | `/chat/stream` | 对话（SSE 流式返回） |
+| GET | `/trend` | 营养趋势（连续 N 天每日营养合计，缺失补零） |
 
 ---
 
@@ -179,6 +180,34 @@ while (true) {
   }
 }
 ```
+
+---
+
+### 3.5 营养趋势（D4 新增，C 补充）
+
+```
+GET /trend?days=7&end_date=2026-08-03
+```
+
+**请求参数**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `days` | int | 否 | 天数，默认 7 |
+| `end_date` | string | 否 | 结束日期 `YYYY-MM-DD`，默认今天 |
+
+**响应 200**：连续 N 天每日营养合计（缺失日期补零，供趋势图）
+
+```json
+[
+  { "date": "2026-07-28", "total_calories": 0, "total_protein": 0,
+    "total_carbs": 0, "total_fat": 0, "dish_count": 0 },
+  { "date": "2026-07-29", "total_calories": 500.0, "total_protein": 20.0,
+    "total_carbs": 10.0, "total_fat": 35.0, "dish_count": 1 }
+]
+```
+
+> 实现：`backend/main.py` 中 `GET /trend` 调用 A 的 `db.get_weekly_trend()`。
 
 ---
 

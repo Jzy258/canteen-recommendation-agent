@@ -41,3 +41,18 @@ export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
 }
+
+export interface TrendPoint {
+  date: string
+  total_calories: number
+  total_protein: number
+  total_carbs: number
+  total_fat: number
+  dish_count: number
+}
+
+export interface UserProfile {
+  budget: number
+  flavor_preferences: string
+  health_goals: string
+}
