@@ -519,26 +519,43 @@ class SQLiteDatabase(DatabaseInterface):
     # ---- weather ----
 
     def get_dishes_by_weather_tag(self, weather_type: str) -> list[dict]:
-        tag_map = {
-            "cold": ["热汤", "炖菜", "火锅", "热饮", "面食", "汤"],
-            "hot":  ["凉菜", "清淡", "水果", "冷饮", "清蒸", "凉拌"],
-        }
-        tags = tag_map.get(weather_type, [])
+        """按天气类型推荐菜品：从 weather_food_map.csv 读取标签映射。
+        weather_type: cold(天冷→热汤/炖菜/热饮) / hot(天热→凉菜/清淡/水果)
+        匹配 dish 的 flavor_tags(口味标签) 或 category(类别)。"""
+        tags = self._weather_tags(weather_type)
         if not tags:
             return []
-        placeholders = " OR ".join(["flavor_tags LIKE ?" for _ in tags])
-        params = [f"%{t}%" for t in tags]
-        sql = f"SELECT * FROM dish WHERE {placeholders} ORDER BY id"
+        clauses, params = [], []
+        for field, keyword in tags:
+            if field == "category":
+                clauses.append("category = ?")
+            else:
+                clauses.append("flavor_tags LIKE ?")
+                keyword = f"%{keyword}%"
+            params.append(keyword)
+        sql = f"SELECT * FROM dish WHERE {' OR '.join(clauses)} ORDER BY id"
         with self._connect() as conn:
             rows = conn.execute(sql, params).fetchall()
-        results = [dict(r) for r in rows]
-        seen = set()
-        unique = []
-        for r in results:
+        seen, unique = set(), []
+        for r in rows:
             if r["id"] not in seen:
                 seen.add(r["id"])
-                unique.append(r)
+                unique.append(dict(r))
         return unique
+
+    def _weather_tags(self, weather_type: str) -> list[tuple]:
+        """从 weather_food_map.csv 读取 (match_field, keyword) 列表。"""
+        map_path = os.path.join(os.path.dirname(SCHEMA_PATH), "..", "data",
+                                "weather_food_map.csv")
+        tags = []
+        if not os.path.exists(map_path):
+            return tags
+        import csv
+        with open(map_path, encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                if row.get("weather_type") == weather_type and row.get("keyword"):
+                    tags.append((row["match_field"], row["keyword"]))
+        return tags
 
 
 # =============================================================================
