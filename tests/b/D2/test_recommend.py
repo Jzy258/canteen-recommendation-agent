@@ -3,72 +3,72 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[3] / "backend"))
 
-from tools.recommend import recommend_dishes
+from tools.scoring import recommend
 
 
 def test_recommend_with_budget():
-    r = recommend_dishes.invoke({"budget": 10, "top_n": 3})
+    r = recommend.invoke({"budget": 10, "top_k": 3})
     assert len(r) == 3, "Should return 3 results"
     for d in r:
         assert d["price"] <= 10, f"Price {d['price']} exceeds budget 10"
-    assert r[0]["recommend_score"] >= r[1]["recommend_score"], "Should be sorted by score"
+    assert r[0]["score"] >= r[1]["score"], "Should be sorted by score"
+    assert all(k in r[0] for k in ["score", "budget_score", "nutrition_score", "preference_score"])
     print(f"  budget 10: {[d['name'] for d in r]}")
-    print(f"  scores: {[d['recommend_score'] for d in r]}")
-
-
-def test_recommend_with_category():
-    r = recommend_dishes.invoke({"pref_category": "素菜", "top_n": 3})
-    assert len(r) == 3
-    for d in r:
-        assert "recommend_score" in d
-    print(f"  category 素菜: {[d['name'] for d in r]}")
-    print(f"  scores: {[d['recommend_score'] for d in r]}")
+    print(f"  scores: {[d['score'] for d in r]}")
 
 
 def test_recommend_with_health_goal():
-    r = recommend_dishes.invoke({"health_goal": "高蛋白", "top_n": 3})
+    r = recommend.invoke({"health_goals": "高蛋白", "top_k": 3})
     assert len(r) == 3
+    assert all("score" in d for d in r)
     print(f"  health 高蛋白: {[d['name'] for d in r]}")
-    print(f"  scores: {[d['recommend_score'] for d in r]}")
+    print(f"  scores: {[d['score'] for d in r]}")
 
 
-def test_recommend_with_flavor():
-    r = recommend_dishes.invoke({"pref_flavor": "辣", "top_n": 3})
+def test_recommend_with_preferences():
+    r = recommend.invoke({"preferences": "辣", "top_k": 3})
     assert len(r) == 3
     print(f"  flavor 辣: {[d['name'] for d in r]}")
-    print(f"  scores: {[d['recommend_score'] for d in r]}")
+    print(f"  scores: {[d['score'] for d in r]}")
 
 
 def test_recommend_all_params():
-    r = recommend_dishes.invoke({
+    r = recommend.invoke({
         "budget": 12,
-        "pref_category": "荤菜",
-        "pref_flavor": "辣",
-        "health_goal": "高蛋白",
-        "top_n": 5,
+        "preferences": "辣",
+        "health_goals": "高蛋白",
+        "top_k": 5,
     })
     assert len(r) == 5
     for d in r:
-        assert d["recommend_score"] >= 0
+        assert d["score"] >= 0
+        assert d["price"] <= 12, "budget hard constraint"
     print(f"  all params: {[d['name'] for d in r]}")
-    print(f"  scores: {[d['recommend_score'] for d in r]}")
+    print(f"  scores: {[d['score'] for d in r]}")
 
 
 def test_recommend_default():
-    r = recommend_dishes.invoke({})
-    assert len(r) == 5, "Default top_n should be 5"
-    assert all(d["recommend_score"] == 50.0 for d in r), "Default score should be 50"
-    print(f"  default: {len(r)} results, score={r[0]['recommend_score']}")
+    r = recommend.invoke({})
+    assert len(r) == 5, "Default top_k should be 5"
+    assert all("score" in d for d in r)
+    print(f"  default: {len(r)} results, top score={r[0]['score']}")
+
+
+def test_recommend_score_range():
+    r = recommend.invoke({"budget": 15, "top_k": 10})
+    for d in r:
+        assert 0 <= d["score"] <= 1, f"score {d['score']} out of [0,1]"
+    print("  scores all within [0,1]")
 
 
 if __name__ == "__main__":
     tests = [
         test_recommend_with_budget,
-        test_recommend_with_category,
         test_recommend_with_health_goal,
-        test_recommend_with_flavor,
+        test_recommend_with_preferences,
         test_recommend_all_params,
         test_recommend_default,
+        test_recommend_score_range,
     ]
     passed = 0
     for t in tests:
