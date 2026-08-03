@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from langchain_core.messages import HumanMessage, AIMessage
 
 from agent.agent import create_agent_executor
-from middleware import RequestMetricsMiddleware, add_tokens, get_metrics
+from middleware import RequestMetricsMiddleware, add_tokens, get_metrics, count_tokens, count_messages
 
 app = FastAPI(title="Canteen Recommendation Agent", version="0.4.0")
 
@@ -70,9 +70,9 @@ def chat(req: ChatRequest):
         result = agent.invoke({"messages": messages})
         # last message is the final AI reply
         reply = result["messages"][-1].content
-        # 粗略 Token 统计（输入+输出字数 ≈ token）
-        in_tokens = len(req.message) + sum(len(m.content) for m in history if m.content)
-        out_tokens = len(reply) if reply else 0
+        # Token 统计（tiktoken 精确计数，回退字符估算）
+        in_tokens = count_tokens(req.message) + count_messages(history)
+        out_tokens = count_tokens(reply)
         add_tokens(in_tokens + out_tokens)
     except Exception as e:
         logger.exception("chat failed: %s", e)
@@ -94,7 +94,7 @@ def _stream_reply(session_id: str, message: str):
         messages = history + [HumanMessage(content=message)]
         result = agent.invoke({"messages": messages})
         reply = result["messages"][-1].content
-        add_tokens(len(message) + len(reply))
+        add_tokens(count_tokens(message) + count_tokens(reply))
     except Exception as e:
         logger.exception("chat stream failed: %s", e)
         reply = "抱歉，系统处理出错，请稍后再试或换一种问法。"

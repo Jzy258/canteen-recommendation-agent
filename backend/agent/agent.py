@@ -1,5 +1,27 @@
+import functools
+import logging
+
 from langchain.agents import create_agent
 from llm.client import get_llm
+
+logger = logging.getLogger("canteen.tools")
+
+
+def safe_tool(tool_obj):
+    """工具异常兜底：包装已有 @tool，单工具失败返回友好提示，不打断 Agent 工具循环。"""
+    orig_func = tool_obj.func
+
+    @functools.wraps(orig_func)
+    def wrapper(*args, **kwargs):
+        try:
+            return orig_func(*args, **kwargs)
+        except Exception as e:
+            logger.exception("tool %s failed: %s", tool_obj.name, e)
+            return (f"工具执行出错（{tool_obj.name}），请检查输入或稍后重试。"
+                    f"错误信息已记录。")
+    # 替换底层 func，保留 name/description/schema
+    tool_obj.func = wrapper
+    return tool_obj
 from tools.search import search_dish, get_all_dishes
 from tools.scoring import recommend
 from tools.optimizer import optimize_meal_tool
@@ -22,7 +44,7 @@ from agent.subagent import optimize_meal_subagent
 from store.profile import set_user_profile, get_user_profile_tool
 from mcp.weather_tool import get_weather_recommendation
 
-tools = [
+_raw_tools = [
     search_dish,
     get_all_dishes,
     retrieve_dishes,
@@ -45,6 +67,9 @@ tools = [
     set_user_profile,
     get_user_profile_tool,
 ]
+
+# 每个工具包异常兜底，保证工具异常不打断 Agent 循环
+tools = [safe_tool(t) for t in _raw_tools]
 
 SYSTEM_PROMPT = (
     "You are a helpful canteen meal assistant. You help users find dishes "

@@ -167,13 +167,19 @@ class ChromaDishRetriever:
 
 
 # 全局缓存
-_retriever_cache: dict[int, ChromaDishRetriever] = {}
+_retriever_cache: dict[str, ChromaDishRetriever] = {}
+
+
+def _content_key(dishes: list[dict]) -> str:
+    """基于菜品 id+name 集合的确定性键：数据变更时键变化 → 重建索引。"""
+    signature = "|".join(f"{d.get('id')}:{d.get('name')}" for d in dishes)
+    return str(zlib.crc32(signature.encode("utf-8")))
 
 
 def get_retriever() -> ChromaDishRetriever:
     db = get_db()
     dishes = db.get_all_dishes()
-    key = len(dishes)
+    key = _content_key(dishes)
     if key not in _retriever_cache:
         persist = os.getenv("CHROMA_DB_PATH", "backend/data/chroma_db")
         _retriever_cache[key] = ChromaDishRetriever(dishes, persist_dir=persist)
