@@ -86,9 +86,10 @@ uv run python backend/mcp/weather_server.py
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
+| `USE_CLOUD_API` | `false` | **LLM 开关**：`true`=云端 API，`false`=本地 Ollama |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | 本地；Docker 内 `http://ollama:11434` |
 | `OLLAMA_MODEL` | `qwen2.5:7b` | 本地模型 |
-| `OPENAI_API_KEY` | 空 | 云端 LLM 切换（可选） |
+| `OPENAI_API_KEY` | 空 | 云端 LLM（`USE_CLOUD_API=true` 时必填） |
 | `LLM_TIMEOUT` | `60` | LLM 请求超时秒 |
 | `LLM_MAX_RETRIES` | `2` | LLM 重试次数 |
 | `WEATHER_API_KEY` | 空 | 高德天气 key（可选，mock 回退） |
