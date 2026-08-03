@@ -20,6 +20,7 @@ from tools.record import (
 from rag.retriever import retrieve_dishes
 from agent.subagent import optimize_meal_subagent
 from store.profile import set_user_profile, get_user_profile_tool
+from mcp.weather_tool import get_weather_recommendation
 
 tools = [
     search_dish,
@@ -28,6 +29,7 @@ tools = [
     recommend,
     optimize_meal_tool,
     optimize_meal_subagent,
+    get_weather_recommendation,
     record_meal,
     confirm_record,
     reject_record,
@@ -52,6 +54,7 @@ SYSTEM_PROMPT = (
     "Use recommend to recommend dishes based on budget, flavor preference, and health goals. "
     "Use optimize_meal_tool to find the best meal combination under a budget and calorie limit. "
     "Use optimize_meal_subagent to delegate the whole meal-planning task to a specialist agent. "
+    "Use get_weather_recommendation to check weather (city) and get weather-based dish suggestions. "
     "Use record_meal to record a meal intake. Use confirm_record / confirm_records to confirm, "
     "reject_record / reject_records to reject. "
     "Use get_pending_records / get_pending_records_by_date to list pending HITL records. "

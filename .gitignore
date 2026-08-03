@@ -247,4 +247,10 @@ docs/具体计划（B角色）.md
 # Chroma vector DB
 backend/data/chroma_db/
 
+# runtime metrics
+backend/data/metrics.json
+
+# adcode cache
+backend/data/adcode_cache.json
+
 .idea
