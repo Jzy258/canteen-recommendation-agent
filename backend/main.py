@@ -10,8 +10,9 @@ from pydantic import BaseModel
 from langchain_core.messages import HumanMessage, AIMessage
 
 from agent.agent import create_agent_executor
+from middleware import RequestMetricsMiddleware, add_tokens, get_metrics
 
-app = FastAPI(title="Canteen Recommendation Agent", version="0.2.0")
+app = FastAPI(title="Canteen Recommendation Agent", version="0.3.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,6 +21,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(RequestMetricsMiddleware)
 
 agent = create_agent_executor()
 
@@ -43,6 +45,12 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/metrics")
+def metrics():
+    """查看中间件统计：请求数 / 耗时 / Token。"""
+    return get_metrics()
+
+
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
     if not req.message or not req.message.strip():
@@ -56,6 +64,10 @@ def chat(req: ChatRequest):
         result = agent.invoke({"messages": messages})
         # last message is the final AI reply
         reply = result["messages"][-1].content
+        # 粗略 Token 统计（输入+输出字数 ≈ token）
+        in_tokens = len(req.message) + sum(len(m.content) for m in history if m.content)
+        out_tokens = len(reply) if reply else 0
+        add_tokens(in_tokens + out_tokens)
     except Exception as e:
         reply = f"Sorry, an error occurred: {str(e)}"
 

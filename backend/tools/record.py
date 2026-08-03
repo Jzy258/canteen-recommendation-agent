@@ -29,6 +29,30 @@ def get_pending_records() -> list[dict]:
 
 
 @tool
+def get_pending_records_by_date(date: str, meal_time: str = "") -> list[dict]:
+    """Get pending meal records filtered by date (and optional meal_time)."""
+    return db.get_pending_records_by_date(date=date, meal_time=meal_time)
+
+
+@tool
+def get_pending_record(record_id: int) -> dict:
+    """Get a single pending meal record by id."""
+    return db.get_pending_record(record_id)
+
+
+@tool
+def confirm_records(record_ids: list[int]) -> int:
+    """Confirm multiple pending meal records at once. Returns confirmed count."""
+    return db.confirm_records(record_ids)
+
+
+@tool
+def reject_records(record_ids: list[int]) -> int:
+    """Reject multiple pending meal records at once. Returns rejected count."""
+    return db.reject_records(record_ids)
+
+
+@tool
 def get_daily_intake(date: str) -> list[dict]:
     """Get daily nutrition breakdown by meal_time."""
     return db.get_daily_nutrition(date)
