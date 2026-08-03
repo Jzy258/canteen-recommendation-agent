@@ -1,6 +1,7 @@
 # A → B 联调确认：db 接口合约
 
-> 更新日期：2026-08-02
+> 版本：v1.2　|　更新日期：2026-08-03　|　适用：A/B
+> 遵循 `docs/版本管理规范.md` §5（文档版本与软件版本分离）
 > B 的 tools/search.py、tools/record.py 通过以下接口访问数据库，无需直接操作 SQLite。
 > 联调状态：record.py 调用模式已由 `tests/A/D3/test_record_integration.py` 模拟验证通过。
 

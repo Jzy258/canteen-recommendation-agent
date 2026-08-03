@@ -90,7 +90,7 @@ try:
 
     # ============================================================
     print("\n" + "=" * 50)
-    print("4. 抽象接口声明 + @tool")
+    print("4. 抽象接口声明")
     print("=" * 50)
     from db import DatabaseInterface
     interface_methods = {m for m in dir(DatabaseInterface) if not m.startswith("_")}
@@ -98,19 +98,11 @@ try:
     assert "get_dishes_by_weather_tag" in interface_methods, "抽象接口缺天气查询函数"
     assert "get_dishes_by_weather_tag" in impl_methods, "实现缺天气查询函数"
     print("  [PASS] get_dishes_by_weather_tag 已声明于抽象接口并实现")
-
-    # 天气 @tool 需要 backend 在 sys.path（tools 为 backend 下的包）
-    backend_dir = os.path.join(_PROJECT_ROOT, "backend")
-    if backend_dir not in sys.path:
-        sys.path.insert(0, backend_dir)
-    from tools.weather import recommend_by_weather
-    r = recommend_by_weather.invoke({"weather_type": "cold", "top_k": 3})
-    assert len(r) == 3 and all("name" in d for d in r)
-    assert any("汤" in d["name"] for d in r), f"天冷应含汤类: {r}"
-    print(f"  [PASS] recommend_by_weather @tool 返回3道: {[d['name'] for d in r]}")
-    r_hot = recommend_by_weather.invoke({"weather_type": "hot"})
-    assert len(r_hot) == 5
-    print("  [PASS] recommend_by_weather 默认 top_k=5")
+    # 天气推荐 @tool 由 B 的 get_weather_recommendation 承担，A 不重复提供
+    import os.path as _osp
+    assert not _osp.exists(_osp.join(_PROJECT_ROOT, "backend", "tools", "weather.py")), \
+        "backend/tools/weather.py 应已移除（避免与 B 的天气工具重复）"
+    print("  [PASS] A 不再提供天气 @tool（B 的 get_weather_recommendation 承担，工具唯一）")
 
     # ============================================================
     print("\n" + "=" * 50)
@@ -120,12 +112,20 @@ try:
     assert db.get_dishes_by_weather_tag("mild") == []
     print("  [PASS] mild(温和) 返回空列表（由 B 的天气工具走 get_all_dishes 兜底）")
 
-    # B 的 weather_tool 直接调用 db.get_dishes_by_weather_tag
+    # B 的 weather_tool 直接调用 db.get_dishes_by_weather_tag（需 backend 在 sys.path）
+    backend_dir = os.path.join(_PROJECT_ROOT, "backend")
+    if backend_dir not in sys.path:
+        sys.path.insert(0, backend_dir)
     from mcp.weather_tool import get_weather_recommendation
     msg = get_weather_recommendation.invoke({"city": "北京"})
     assert isinstance(msg, str) and "°C" in msg, f"返回应为天气描述: {msg}"
     assert "推荐方向" in msg or "候选菜品" in msg, f"应含推荐方向/候选菜: {msg}"
     print(f"  [PASS] get_weather_recommendation 联动成功: {msg[:60]}...")
+    # 冷天推荐方向命中热汤面
+    from mcp.weather_data import weather_to_dish_type
+    assert "热汤" in weather_to_dish_type("cold"), "cold 应映射热汤面"
+    assert "清淡" in weather_to_dish_type("hot"), "hot 应映射清淡"
+    print("  [PASS] weather_to_dish_type 冷→热汤面/热→清淡")
 
     # 天气候选与 A 的评分排序一致（天气推荐可叠加评分）
     import json

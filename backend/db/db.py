@@ -446,8 +446,18 @@ class SQLiteDatabase(DatabaseInterface):
         缺失日期补零，保证连续 days 天的序列，方便前端画趋势图。"""
         from datetime import date, datetime, timedelta
 
+        try:
+            days = int(days)
+        except (TypeError, ValueError):
+            days = 7
+        if days <= 0:
+            days = 7
+
         if end_date:
-            end = datetime.strptime(end_date, "%Y-%m-%d").date()
+            try:
+                end = datetime.strptime(end_date, "%Y-%m-%d").date()
+            except (TypeError, ValueError):
+                end = date.today()
         else:
             end = date.today()
         start = end - timedelta(days=days - 1)
@@ -485,16 +495,27 @@ class SQLiteDatabase(DatabaseInterface):
                             flavor_preferences: str = "",
                             dietary_restrictions: str = "",
                             health_goals: str = "") -> int:
+        """保存/更新用户画像。
+        仅更新传入的非空字段；空字段保留原值，避免部分更新时丢数据。
+        """
         existing = self.get_user_profile()
         now = "datetime('now', 'localtime')"
         if existing:
+            # 合并：只覆盖非空入参，其余保留已有值
+            merged = dict(existing)
+            for key, val in [("budget", budget),
+                             ("flavor_preferences", flavor_preferences),
+                             ("dietary_restrictions", dietary_restrictions),
+                             ("health_goals", health_goals)]:
+                if val not in (None, "", 0):
+                    merged[key] = val
             sql = f"""UPDATE user_profile SET
                       budget = ?, flavor_preferences = ?, dietary_restrictions = ?,
                       health_goals = ?, updated_at = {now}
                       WHERE id = ?"""
             with self._connect() as conn:
-                conn.execute(sql, (budget, flavor_preferences,
-                                   dietary_restrictions, health_goals,
+                conn.execute(sql, (merged["budget"], merged["flavor_preferences"],
+                                   merged["dietary_restrictions"], merged["health_goals"],
                                    existing["id"]))
                 return existing["id"]
         else:
