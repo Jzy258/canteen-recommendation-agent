@@ -1,0 +1,11 @@
+{
+  "requests": 12,
+  "errors": 0,
+  "total_time_ms": 20667.29,
+  "total_tokens": 0,
+  "by_path": {
+    "/health": 4,
+    "/chat": 8
+  },
+  "updated_at": "2026-08-03T15:24:21"
+}

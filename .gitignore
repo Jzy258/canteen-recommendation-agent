@@ -243,6 +243,7 @@ http-client.private.env.json
 
 docs/A-工作计划.md
 docs/具体计划（B角色）.md
+docs/C-工作计划.md
 
 # Chroma vector DB
 backend/data/chroma_db/
