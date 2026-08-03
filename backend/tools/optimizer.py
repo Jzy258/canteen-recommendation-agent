@@ -41,9 +41,16 @@ def optimize_meal(dishes: list[dict], budget: float, calorie_limit: float,
         dict: 含 dishes（选中菜品）、total_price、total_calories、
               total_protein、categories、balance_ok、reason
     """
+    try:
+        budget = float(budget)
+        calorie_limit = float(calorie_limit)
+    except (TypeError, ValueError):
+        return _empty_result("预算或热量上限必须是数值")
+
     if budget <= 0 or calorie_limit <= 0:
         return _empty_result("预算或热量上限必须大于 0")
 
+    dishes = dishes or []
     candidates = [
         d for d in dishes
         if _as_float(d, "price") <= budget + 1e-6

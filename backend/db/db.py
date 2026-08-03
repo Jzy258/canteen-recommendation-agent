@@ -446,8 +446,18 @@ class SQLiteDatabase(DatabaseInterface):
         缺失日期补零，保证连续 days 天的序列，方便前端画趋势图。"""
         from datetime import date, datetime, timedelta
 
+        try:
+            days = int(days)
+        except (TypeError, ValueError):
+            days = 7
+        if days <= 0:
+            days = 7
+
         if end_date:
-            end = datetime.strptime(end_date, "%Y-%m-%d").date()
+            try:
+                end = datetime.strptime(end_date, "%Y-%m-%d").date()
+            except (TypeError, ValueError):
+                end = date.today()
         else:
             end = date.today()
         start = end - timedelta(days=days - 1)
