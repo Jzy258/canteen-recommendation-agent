@@ -8,6 +8,10 @@ from tools.record import (
     confirm_record,
     reject_record,
     get_pending_records,
+    get_pending_records_by_date,
+    get_pending_record,
+    confirm_records,
+    reject_records,
     get_daily_intake,
     get_day_total,
     get_weekly_trend,
@@ -15,6 +19,7 @@ from tools.record import (
 )
 from rag.retriever import retrieve_dishes
 from agent.subagent import optimize_meal_subagent
+from store.profile import set_user_profile, get_user_profile_tool
 
 tools = [
     search_dish,
@@ -27,10 +32,16 @@ tools = [
     confirm_record,
     reject_record,
     get_pending_records,
+    get_pending_records_by_date,
+    get_pending_record,
+    confirm_records,
+    reject_records,
     get_daily_intake,
     get_day_total,
     get_weekly_trend,
     get_weekly_summary,
+    set_user_profile,
+    get_user_profile_tool,
 ]
 
 SYSTEM_PROMPT = (
@@ -41,11 +52,15 @@ SYSTEM_PROMPT = (
     "Use recommend to recommend dishes based on budget, flavor preference, and health goals. "
     "Use optimize_meal_tool to find the best meal combination under a budget and calorie limit. "
     "Use optimize_meal_subagent to delegate the whole meal-planning task to a specialist agent. "
-    "Use record_meal to record a meal intake, then confirm_record to confirm it. "
+    "Use record_meal to record a meal intake. Use confirm_record / confirm_records to confirm, "
+    "reject_record / reject_records to reject. "
+    "Use get_pending_records / get_pending_records_by_date to list pending HITL records. "
     "Use get_daily_intake / get_day_total to view nutrition by day. "
     "Use get_weekly_trend / get_weekly_summary to view weekly nutrition trends. "
+    "Use set_user_profile to remember user preferences (budget, flavor, restrictions, health goal). "
+    "Use get_user_profile_tool to read remembered user profile. "
     "Always respond in Chinese. When recommending, explain why each dish is recommended. "
-    "When the user confirms recording a meal, first call record_meal then confirm_record."
+    "When the user confirms recording a meal, first call record_meal then confirm_record/confirm_records."
 )
 
 
