@@ -162,20 +162,27 @@ def recommend(budget: float = 20, preferences: str = "",
               health_goals: str = "", top_k: int = 5) -> list[dict]:
     """推荐符合预算与营养需求的菜品。
     Args:
-        budget: 预算（元/餐），默认 20。
-        preferences: 口味偏好，逗号分隔（如 "辣,清淡"）。
-        health_goals: 营养目标（高蛋白/控油/控糖/增肌/减脂），可空。
+        budget: 预算（元/餐），默认 20；不传或为 0 时使用已保存的用户画像。
+        preferences: 口味偏好，逗号分隔（如 "辣,清淡"）；为空时使用已保存画像。
+        health_goals: 营养目标（高蛋白/控油/控糖/增肌/减脂）；为空时使用已保存画像。
         top_k: 返回数量，默认 5。
     """
     from db import get_db
 
+    db = get_db()
+    # 合并已存画像：显式入参优先，缺省值回落到 user_profile
+    saved = db.get_user_profile() or {}
+    effective_budget = float(budget) if budget else float(saved.get("budget") or 20)
+    effective_prefs = preferences if preferences else saved.get("flavor_preferences", "")
+    effective_goal = health_goals if health_goals else saved.get("health_goals", "")
+
     user_profile = {
-        "budget": float(budget),
-        "flavor_preferences": preferences,
-        "health_goals": health_goals,
+        "budget": effective_budget,
+        "flavor_preferences": effective_prefs,
+        "health_goals": effective_goal,
     }
-    dishes = get_db().get_all_dishes()
+    dishes = db.get_all_dishes()
     # 预算硬约束：价格 > 预算的菜品直接排除
-    dishes = [d for d in dishes if float(d["price"]) <= float(budget)]
-    scored = score_dishes(dishes, user_profile, budget=float(budget))
+    dishes = [d for d in dishes if float(d["price"]) <= effective_budget]
+    scored = score_dishes(dishes, user_profile, budget=effective_budget)
     return scored[:top_k]
