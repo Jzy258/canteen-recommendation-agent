@@ -11,7 +11,9 @@ load_dotenv()
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage, AIMessage
 
@@ -20,7 +22,10 @@ from agent.session import session_store
 from middleware import RequestMetricsMiddleware, add_tokens, get_metrics, count_tokens, count_messages
 from version import APP_NAME, VERSION
 
-app = FastAPI(title=APP_NAME, version=VERSION)
+# 静态目录：本地 swagger-ui 资源（避免依赖 jsdelivr CDN）
+_STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+
+app = FastAPI(title=APP_NAME, version=VERSION, docs_url=None, redoc_url=None)
 
 app.add_middleware(
     CORSMiddleware,
@@ -30,6 +35,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(RequestMetricsMiddleware)
+
+# 挂载本地 swagger-ui 静态资源
+app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
 agent = create_agent_executor()
 
@@ -49,6 +57,27 @@ class ChatResponse(BaseModel):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/docs", include_in_schema=False)
+def custom_docs():
+    """本地 Swagger UI（资源来自本地 static，不依赖 CDN）。"""
+    return get_swagger_ui_html(
+        openapi_url=app.openapi_url,
+        title=f"{APP_NAME} - Swagger UI",
+        swagger_js_url="/static/swagger/swagger-ui-bundle.js",
+        swagger_css_url="/static/swagger/swagger-ui.css",
+        swagger_favicon_url="/static/swagger/swagger-ui.css",
+    )
+
+
+@app.get("/redoc", include_in_schema=False)
+def custom_redoc():
+    from fastapi.openapi.docs import get_redoc_html
+    return get_redoc_html(
+        openapi_url=app.openapi_url,
+        title=f"{APP_NAME} - ReDoc",
+    )
 
 
 @app.get("/metrics")
