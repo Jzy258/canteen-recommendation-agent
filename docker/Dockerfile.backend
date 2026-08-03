@@ -32,4 +32,6 @@ ENV OLLAMA_BASE_URL=http://ollama:11434
 
 EXPOSE 8000
 
-CMD ["python", "main.py"]
+# 启动前初始化数据库（建表 + 导入菜品/菜单），再启动 FastAPI
+# WORKDIR=/app/backend，故用 data/init_db.py（相对路径）
+CMD ["sh", "-c", "python data/init_db.py && python main.py"]
