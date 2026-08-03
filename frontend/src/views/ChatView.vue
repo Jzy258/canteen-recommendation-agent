@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { nextTick, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { chat } from '@/api/chat'
+import { chat, chatStream } from '@/api/chat'
 import type { ChatMessage } from '@/types/chat'
 
 const SESSION_KEY = 'canteen.session_id'
@@ -9,7 +9,9 @@ const SESSION_KEY = 'canteen.session_id'
 const messages = ref<ChatMessage[]>([])
 const input = ref('')
 const loading = ref(false)
+const streaming = ref(false)
 const listRef = ref<HTMLElement>()
+let abortController: AbortController | null = null
 
 function getSessionId(): string {
   return localStorage.getItem(SESSION_KEY) || ''
@@ -28,6 +30,46 @@ function scrollToBottom(): void {
   })
 }
 
+function currentAssistant(): ChatMessage {
+  let last = messages.value[messages.value.length - 1]
+  if (!last || last.role !== 'assistant') {
+    last = { role: 'assistant', content: '' }
+    messages.value.push(last)
+  }
+  return last
+}
+
+function appendAssistant(text: string): void {
+  const msg = currentAssistant()
+  msg.content += text
+  scrollToBottom()
+}
+
+async function sendByStream(text: string): Promise<'ok' | 'aborted' | 'failed'> {
+  const sid = getSessionId() || undefined
+  abortController = new AbortController()
+  let succeeded = false
+  try {
+    await chatStream(
+      { message: text, session_id: sid },
+      (event) => {
+        if (event.type === 'session') {
+          saveSessionId(event.session_id)
+        } else if (event.type === 'delta') {
+          appendAssistant(event.content)
+        } else if (event.type === 'done') {
+          succeeded = true
+        }
+      },
+      abortController.signal,
+    )
+    return succeeded ? 'ok' : 'failed'
+  } catch (e: unknown) {
+    if ((e as Error).name === 'AbortError') return 'aborted'
+    return 'failed'
+  }
+}
+
 async function send(): Promise<void> {
   const text = input.value.trim()
   if (!text) {
@@ -41,28 +83,65 @@ async function send(): Promise<void> {
   loading.value = true
   scrollToBottom()
 
+  let status: 'ok' | 'aborted' | 'failed' = 'failed'
+  streaming.value = true
   try {
-    const res = await chat({ message: text, session_id: getSessionId() || undefined })
-    saveSessionId(res.session_id)
-    messages.value.push({ role: 'assistant', content: res.reply })
-  } catch (e: unknown) {
-    const err = e as { response?: { status?: number }; message?: string }
-    ElMessage.error(
-      err?.response?.status === 400
-        ? '请求参数有误，请检查输入'
-        : '服务暂时不可用，请稍后再试',
-    )
-    messages.value.push({
-      role: 'assistant',
-      content: '抱歉，系统处理出错，请稍后再试或换一种问法。',
-    })
-  } finally {
+    status = await sendByStream(text)
+  } catch {
+    status = 'failed'
+  }
+
+  // 用户中止：保留已输出内容，不追加错误文案
+  if (status === 'aborted') {
+    const last = messages.value[messages.value.length - 1]
+    if (last && last.role === 'assistant' && last.content) {
+      last.content += '（已停止）'
+    }
     loading.value = false
+    streaming.value = false
+    abortController = null
     scrollToBottom()
+    return
+  }
+
+  // 流式失败：回退到非流式 /chat
+  if (status === 'failed') {
+    try {
+      const res = await chat({ message: text, session_id: getSessionId() || undefined })
+      saveSessionId(res.session_id)
+      currentAssistant().content = res.reply
+      status = 'ok'
+    } catch (e: unknown) {
+      const err = e as { response?: { status?: number } }
+      if (err?.response?.status !== 400) {
+        ElMessage.warning('流式通道不可用，切换为普通模式')
+      }
+      status = 'failed'
+    }
+  }
+
+  loading.value = false
+  streaming.value = false
+  abortController = null
+  scrollToBottom()
+
+  if (status === 'failed') {
+    const msg = currentAssistant()
+    if (!msg.content) {
+      msg.content = '抱歉，系统处理出错，请稍后再试或换一种问法。'
+      ElMessage.error('服务暂时不可用，请稍后再试')
+    }
   }
 }
 
+function stop(): void {
+  abortController?.abort()
+  streaming.value = false
+  loading.value = false
+}
+
 function startNewSession(): void {
+  if (loading.value) stop()
   localStorage.removeItem(SESSION_KEY)
   messages.value = []
 }
@@ -95,6 +174,7 @@ function onEnter(): void {
         >
           <div class="chat-bubble">{{ msg.content }}</div>
         </div>
+        <div v-if="streaming" class="chat-cursor">▍</div>
       </div>
 
       <div class="chat-input">
@@ -107,8 +187,11 @@ function onEnter(): void {
           @keydown.enter.exact.prevent="onEnter"
         />
         <div class="chat-actions">
-          <el-button type="primary" :loading="loading" @click="send">
-            发送
+          <el-button v-if="loading" type="warning" plain @click="stop">
+            停止
+          </el-button>
+          <el-button type="primary" :loading="loading && !streaming" @click="send">
+            {{ loading && streaming ? '回复中…' : '发送' }}
           </el-button>
         </div>
       </div>
@@ -182,6 +265,18 @@ function onEnter(): void {
   color: #303133;
 }
 
+.chat-cursor {
+  padding: 10px 14px;
+  color: #409eff;
+  animation: blink 1s step-start infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
 .chat-input {
   border-top: 1px solid #e4e7ed;
   padding-top: 12px;
@@ -190,6 +285,7 @@ function onEnter(): void {
 .chat-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
   margin-top: 8px;
 }
 </style>
