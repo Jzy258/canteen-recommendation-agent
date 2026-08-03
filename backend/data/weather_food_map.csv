@@ -1,0 +1,15 @@
+weather_type,match_field,keyword
+cold,flavor_tags,热汤
+cold,flavor_tags,炖菜
+cold,flavor_tags,火锅
+cold,flavor_tags,热饮
+cold,flavor_tags,面食
+cold,category,汤
+cold,category,主食
+hot,flavor_tags,凉菜
+hot,flavor_tags,清淡
+hot,flavor_tags,冷饮
+hot,flavor_tags,清蒸
+hot,flavor_tags,凉拌
+hot,category,水果
+hot,category,饮品
