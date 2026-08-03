@@ -9,19 +9,21 @@
 import json
 
 from langchain_core.tools import tool
-from db import get_db
 
-db = get_db()
+
+def _db():
+    from db import get_db
+    return get_db()
 
 
 def get_profile() -> dict | None:
-    return db.get_user_profile()
+    return _db().get_user_profile()
 
 
 def save_profile(budget: float = 0, flavor_preferences: str = "",
                  dietary_restrictions: str = "", health_goals: str = "") -> int:
     """持久化用户画像，返回 profile id。"""
-    return db.upsert_user_profile(
+    return _db().upsert_user_profile(
         budget=budget,
         flavor_preferences=flavor_preferences,
         dietary_restrictions=dietary_restrictions,
@@ -34,7 +36,7 @@ def summarize_nutrition(days: int = 7) -> dict | None:
     from datetime import date, timedelta
     end = date.today()
     start = end - timedelta(days=days - 1)
-    trend = db.get_weekly_trend(end_date=end.isoformat(), days=days)
+    trend = _db().get_weekly_trend(end_date=end.isoformat(), days=days)
     confirmed = [t for t in trend if t.get("total_calories", 0) > 0]
     summary = {
         "days": len(confirmed),
@@ -46,7 +48,7 @@ def summarize_nutrition(days: int = 7) -> dict | None:
                              / max(len(confirmed), 1), 1),
         "week_key": end.isoformat(),
     }
-    db.update_nutrition_summary(json.dumps(summary, ensure_ascii=False))
+    _db().update_nutrition_summary(json.dumps(summary, ensure_ascii=False))
     return summary
 
 

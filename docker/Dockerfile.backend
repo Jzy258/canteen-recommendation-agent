@@ -1,0 +1,35 @@
+# 后端 Dockerfile（B 协助 · 关联 ollama 服务）
+# 构建：docker build -f docker/Dockerfile.backend -t canteen-backend .
+# 运行：连接同网络中的 ollama 服务（OLLAMA_BASE_URL=http://ollama:11434）
+FROM python:3.14-slim
+
+WORKDIR /app
+
+# 系统依赖（chromadb / onnxruntime 等编译依赖）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python 依赖
+COPY backend/requirements.txt ./requirements.txt 2>/dev/null || true
+COPY pyproject.toml ./
+RUN pip install --no-cache-dir -r requirements.txt || pip install --no-cache-dir \
+    langchain langchain-ollama langchain-openai langchain-community langchain-chroma \
+    chromadb mcp fastapi uvicorn python-dotenv pydantic numpy tiktoken
+
+# 应用代码
+COPY backend/ ./backend/
+COPY .env.example ./
+
+WORKDIR /app/backend
+
+# 挂载数据卷（SQLite / chroma / 缓存）
+VOLUME ["/app/backend/data"]
+
+ENV DB_PATH=/app/backend/data/canteen.db
+ENV CHROMA_DB_PATH=/app/backend/data/chroma_db
+ENV OLLAMA_BASE_URL=http://ollama:11434
+
+EXPOSE 8000
+
+CMD ["python", "main.py"]

@@ -1,50 +1,32 @@
+import functools
+import logging
+
 from langchain.agents import create_agent
 from llm.client import get_llm
-from tools.search import search_dish, get_all_dishes
-from tools.scoring import recommend
-from tools.optimizer import optimize_meal_tool
-from tools.record import (
-    record_meal,
-    confirm_record,
-    reject_record,
-    get_pending_records,
-    get_pending_records_by_date,
-    get_pending_record,
-    confirm_records,
-    reject_records,
-    get_daily_intake,
-    get_day_total,
-    get_weekly_trend,
-    get_weekly_summary,
-)
-from rag.retriever import retrieve_dishes
-from agent.subagent import optimize_meal_subagent
-from store.profile import set_user_profile, get_user_profile_tool
-from mcp.weather_tool import get_weather_recommendation
+from tools.registry import ALL_TOOLS
 
-tools = [
-    search_dish,
-    get_all_dishes,
-    retrieve_dishes,
-    recommend,
-    optimize_meal_tool,
-    optimize_meal_subagent,
-    get_weather_recommendation,
-    record_meal,
-    confirm_record,
-    reject_record,
-    get_pending_records,
-    get_pending_records_by_date,
-    get_pending_record,
-    confirm_records,
-    reject_records,
-    get_daily_intake,
-    get_day_total,
-    get_weekly_trend,
-    get_weekly_summary,
-    set_user_profile,
-    get_user_profile_tool,
-]
+logger = logging.getLogger("canteen.tools")
+
+
+def safe_tool(tool_obj):
+    """工具异常兜底：包装已有 @tool，单工具失败返回友好提示，不打断 Agent 工具循环。"""
+    orig_func = tool_obj.func
+
+    @functools.wraps(orig_func)
+    def wrapper(*args, **kwargs):
+        try:
+            return orig_func(*args, **kwargs)
+        except Exception as e:
+            logger.exception("tool %s failed: %s", tool_obj.name, e)
+            return (f"工具执行出错（{tool_obj.name}），请检查输入或稍后重试。"
+                    f"错误信息已记录。")
+    # 替换底层 func，保留 name/description/schema
+    tool_obj.func = wrapper
+    return tool_obj
+
+
+# 从注册中心取全部工具，每个包异常兜底，保证工具异常不打断 Agent 循环
+tools = [safe_tool(t) for t in ALL_TOOLS]
 
 SYSTEM_PROMPT = (
     "You are a helpful canteen meal assistant. You help users find dishes "
