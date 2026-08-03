@@ -7,7 +7,6 @@
 import json
 
 from langchain_core.tools import tool
-from db import get_db
 
 # 复用天气数据源逻辑（与 MCP server 同源）
 from mcp.weather_data import get_weather, weather_to_dish_type
@@ -27,7 +26,8 @@ def get_weather_recommendation(city: str = "北京") -> str:
     wtype = data["weather_type"]
     direction = weather_to_dish_type(wtype)
 
-    # 联动菜品库：按天气标签取候选菜
+    # 联动菜品库：按天气标签取候选菜（get_db 延迟到函数内，便于测试隔离）
+    from db import get_db
     db = get_db()
     if wtype == "cold":
         dishes = db.get_dishes_by_weather_tag("cold")

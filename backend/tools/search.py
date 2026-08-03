@@ -1,16 +1,15 @@
 from langchain_core.tools import tool
-from db import get_db
-
-db = get_db()
 
 
 @tool
 def search_dish(keyword: str = "") -> list[dict]:
-    """Search for dishes by name keyword. Returns matching dishes with nutrition info and price."""
-    return db.search_dishes(keyword=keyword)
+    """按菜名关键词搜索菜品，返回匹配菜品的营养信息与价格。"""
+    from db import get_db
+    return get_db().search_dishes(keyword=keyword)
 
 
 @tool
 def get_all_dishes() -> list[dict]:
-    """Get all available dishes in the canteen."""
-    return db.get_all_dishes()
+    """获取食堂全部可用菜品。"""
+    from db import get_db
+    return get_db().get_all_dishes()

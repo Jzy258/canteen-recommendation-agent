@@ -99,6 +99,33 @@ def test_weather_recommendation_cold_has_dishes():
             os.environ["WEATHER_API_KEY"] = saved_key
 
 
+def test_weather_tool_uses_db_mapping():
+    """联调：B 的 get_weather_recommendation 内部复用 A 的 db 天气标签查询。"""
+    import os
+    import mcp.weather_tool as wt
+    saved_key = os.getenv("WEATHER_API_KEY")
+    os.environ["WEATHER_API_KEY"] = ""
+    orig_weather = wt.get_weather
+    wt.get_weather = lambda city: {
+        "city": city, "temperature": -5, "condition": "寒冷（mock 数据）",
+        "weather_type": "cold", "source": "mock",
+    }
+    try:
+        r = wt.get_weather_recommendation.invoke({"city": "北京"})
+        assert "候选菜品" in r, "should include candidate dishes"
+        # 候选菜必须来自 A 的 cold 天气标签映射（热汤/炖菜/面食/汤/主食）
+        from db import get_db
+        cold = get_db().get_dishes_by_weather_tag("cold")
+        assert cold, "A's weather mapping should return cold dishes"
+        print(f"  A cold mapping dishes: {[d['name'] for d in cold[:3]]}...")
+    finally:
+        wt.get_weather = orig_weather
+        if saved_key is None:
+            os.environ.pop("WEATHER_API_KEY", None)
+        else:
+            os.environ["WEATHER_API_KEY"] = saved_key
+
+
 if __name__ == "__main__":
     tests = [
         test_city_to_adcode,
@@ -109,6 +136,7 @@ if __name__ == "__main__":
         test_dish_direction_hot,
         test_weather_recommendation_tool,
         test_weather_recommendation_cold_has_dishes,
+        test_weather_tool_uses_db_mapping,
     ]
     passed = 0
     for t in tests:

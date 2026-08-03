@@ -12,6 +12,7 @@
 """
 import math
 import os
+import zlib
 
 from langchain_core.tools import tool
 from langchain_core.embeddings import Embeddings
@@ -60,7 +61,9 @@ class DeterministicEmbeddings(Embeddings):
     def _build(self, text: str) -> list[float]:
         vec = [0.0] * self._dim
         for f in _tokenize(text):
-            idx = abs(hash(f)) % self._dim
+            # 用 zlib.crc32 确定性哈希（Python 内置 hash() 受 PYTHONHASHSEED 影响，
+            # 跨进程不一致会导致 Chroma 持久化索引在重启后失效）
+            idx = zlib.crc32(f.encode("utf-8")) % self._dim
             vec[idx] += 1.0
         # 归一化
         norm = math.sqrt(sum(x * x for x in vec))
@@ -164,13 +167,19 @@ class ChromaDishRetriever:
 
 
 # 全局缓存
-_retriever_cache: dict[int, ChromaDishRetriever] = {}
+_retriever_cache: dict[str, ChromaDishRetriever] = {}
+
+
+def _content_key(dishes: list[dict]) -> str:
+    """基于菜品 id+name 集合的确定性键：数据变更时键变化 → 重建索引。"""
+    signature = "|".join(f"{d.get('id')}:{d.get('name')}" for d in dishes)
+    return str(zlib.crc32(signature.encode("utf-8")))
 
 
 def get_retriever() -> ChromaDishRetriever:
     db = get_db()
     dishes = db.get_all_dishes()
-    key = len(dishes)
+    key = _content_key(dishes)
     if key not in _retriever_cache:
         persist = os.getenv("CHROMA_DB_PATH", "backend/data/chroma_db")
         _retriever_cache[key] = ChromaDishRetriever(dishes, persist_dir=persist)

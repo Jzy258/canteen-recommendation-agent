@@ -31,9 +31,19 @@ _data = _load_weather_data()
 get_weather = _data.get_weather
 weather_to_dish_type = _data.weather_to_dish_type
 
+
+def _load_version():
+    """按文件路径加载 version 模块（规避包同名遮蔽），返回版本号。"""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "version.py")
+    spec = importlib.util.spec_from_file_location("canteen_version", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.VERSION
+
+
 server = Server(
     "canteen-weather",
-    version="1.0.0",
+    version=_load_version(),
     title="Canteen Weather MCP",
     description="食堂天气 MCP：提供城市温度与天气类型，辅助按天气推荐菜品。",
 )

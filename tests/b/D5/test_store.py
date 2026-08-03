@@ -47,13 +47,6 @@ def test_upsert_updates():
 
 
 def test_build_context_empty():
-    # profile exists from prior test; reset by deleting row
-    store_mod.db._connect()
-    from db import get_db
-    conn_sql = __import__("sqlite3")
-    # directly clear
-    from db.db import SQLiteDatabase as _S
-    # simpler: build context regardless
     ctx = store_mod.build_context()
     assert isinstance(ctx, str) and ctx
     print(f"  context: {ctx[:60]}")
