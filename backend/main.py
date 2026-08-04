@@ -129,29 +129,42 @@ def chat(req: ChatRequest):
 
 
 def _stream_reply(session_id: str, message: str):
-    """流式生成回复，按字符切块 SSE 输出。"""
+    """真实流式输出：通过 agent.astream_events 逐 token 推送 LLM 生成内容。"""
     history = session_store.get(session_id)
     logger.info("chat/stream 请求 | session=%s | msg=%s", session_id, message[:200])
-    try:
-        messages = history + [HumanMessage(content=message)]
-        result = agent.invoke({"messages": messages})
-        reply = clean_markdown(result["messages"][-1].content)
-        add_tokens(count_tokens(message) + count_tokens(reply))
-        logger.info("chat/stream 成功 | session=%s | reply_len=%s", session_id, len(reply))
-    except Exception as e:
-        logger.exception("chat/stream 失败 | session=%s | err=%s", session_id, e)
-        reply = "抱歉，系统处理出错，请稍后再试或换一种问法。"
-
-    session_store.append(session_id, message, reply)
+    messages = history + [HumanMessage(content=message)]
 
     async def gen():
         # 先发 session 元数据
         yield f"data: {json.dumps({'type': 'session', 'session_id': session_id}, ensure_ascii=False)}\n\n"
-        chunk_size = 4
-        for i in range(0, len(reply), chunk_size):
-            piece = reply[i:i + chunk_size]
-            yield f"data: {json.dumps({'type': 'delta', 'content': piece}, ensure_ascii=False)}\n\n"
-            await asyncio.sleep(0.01)
+        buffer = []
+        errored = False
+        try:
+            async for event in agent.astream_events(
+                    {"messages": messages}, version="v2"):
+                if event.get("event") == "on_chat_model_stream":
+                    chunk = event["data"]["chunk"]
+                    delta = chunk.content if isinstance(chunk.content, str) else ""
+                    if delta:
+                        buffer.append(delta)
+                        payload = json.dumps({"type": "delta", "content": delta},
+                                             ensure_ascii=False)
+                        yield f"data: {payload}\n\n"
+        except Exception as e:
+            logger.exception("chat/stream 失败 | session=%s | err=%s", session_id, e)
+            errored = True
+
+        reply = clean_markdown("".join(buffer))
+        if errored or not reply.strip():
+            reply = "抱歉，系统处理出错，请稍后再试或换一种问法。"
+            payload = json.dumps({"type": "delta", "content": reply},
+                                 ensure_ascii=False)
+            yield f"data: {payload}\n\n"
+
+        # Token 统计 + 会话持久化（流式结束时统一处理）
+        add_tokens(count_tokens(message) + count_tokens(reply))
+        session_store.append(session_id, message, reply)
+        logger.info("chat/stream 完成 | session=%s | reply_len=%s", session_id, len(reply))
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
     return StreamingResponse(
