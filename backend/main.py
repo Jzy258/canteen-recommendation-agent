@@ -18,7 +18,7 @@ from agent.agent import create_agent_executor
 from agent.session import session_store
 from middleware import (RequestMetricsMiddleware, add_tokens, get_metrics,
                         count_tokens, count_messages, clean_markdown,
-                        setup_logging, get_logger)
+                        StreamMarkdownCleaner, setup_logging, get_logger)
 from version import APP_NAME, VERSION
 
 # 统一日志系统（backend/logs，按天+大小滚动）
@@ -139,6 +139,7 @@ def _stream_reply(session_id: str, message: str):
         yield f"data: {json.dumps({'type': 'session', 'session_id': session_id}, ensure_ascii=False)}\n\n"
         buffer = []
         errored = False
+        cleaner = StreamMarkdownCleaner()
         try:
             async for event in agent.astream_events(
                     {"messages": messages}, version="v2"):
@@ -146,15 +147,18 @@ def _stream_reply(session_id: str, message: str):
                     chunk = event["data"]["chunk"]
                     delta = chunk.content if isinstance(chunk.content, str) else ""
                     if delta:
-                        buffer.append(delta)
-                        payload = json.dumps({"type": "delta", "content": delta},
-                                             ensure_ascii=False)
-                        yield f"data: {payload}\n\n"
+                        # 逐增量清洗 Markdown，保证前端实时收到纯文本
+                        clean_delta = cleaner.push(delta)
+                        if clean_delta:
+                            buffer.append(clean_delta)
+                            payload = json.dumps({"type": "delta", "content": clean_delta},
+                                                 ensure_ascii=False)
+                            yield f"data: {payload}\n\n"
         except Exception as e:
             logger.exception("chat/stream 失败 | session=%s | err=%s", session_id, e)
             errored = True
 
-        reply = clean_markdown("".join(buffer))
+        reply = clean_markdown("".join(buffer) + cleaner.flush())
         if errored or not reply.strip():
             reply = "抱歉，系统处理出错，请稍后再试或换一种问法。"
             payload = json.dumps({"type": "delta", "content": reply},
