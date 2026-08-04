@@ -37,9 +37,21 @@ export interface StreamDoneEvent {
 
 export type StreamEvent = StreamSessionEvent | StreamDeltaEvent | StreamDoneEvent
 
+export interface ParsedDish {
+  name: string
+  price: number
+  reason?: string
+  calories?: number
+  protein?: number
+  carbs?: number
+  fat?: number
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
+  time?: string
+  dishes?: ParsedDish[]
 }
 
 export interface TrendPoint {

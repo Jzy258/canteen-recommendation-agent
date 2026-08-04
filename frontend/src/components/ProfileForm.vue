@@ -1,28 +1,26 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { FirstAidKit, Sugar, Wallet } from '@element-plus/icons-vue'
 import type { UserProfile } from '@/types/chat'
+import { useProfileStore } from '@/stores/profile'
 
-const PROFILE_KEY = 'canteen.profile'
+const profileStore = useProfileStore()
 
-const budget = ref(20)
-const flavor = ref('')
-const healthGoal = ref('')
+const budget = ref(profileStore.budget)
+const flavor = ref(profileStore.flavor_preferences)
+const healthGoal = ref(profileStore.health_goals)
 
 const GOALS = ['高蛋白', '增肌', '控油', '控糖', '减脂']
 
-function load(): void {
-  const raw = localStorage.getItem(PROFILE_KEY)
-  if (!raw) return
-  try {
-    const p = JSON.parse(raw) as UserProfile
-    budget.value = p.budget || 20
-    flavor.value = p.flavor_preferences || ''
-    healthGoal.value = p.health_goals || ''
-  } catch {
-    // ignore corrupted profile
-  }
-}
+// C12 · 注入话术实时预览（与 ChatView 的 injectedPrompt 一致）
+const preview = computed(() => {
+  const parts: string[] = []
+  if (budget.value > 0) parts.push(`预算${budget.value}元`)
+  if (flavor.value.trim()) parts.push(`口味偏好${flavor.value.trim()}`)
+  if (healthGoal.value) parts.push(`目标${healthGoal.value}`)
+  return parts.length ? `（用户偏好：${parts.join('，')}）请问有什么推荐？` : '尚未设置偏好，将按默认推荐。'
+})
 
 function save(): void {
   const profile: UserProfile = {
@@ -30,64 +28,130 @@ function save(): void {
     flavor_preferences: flavor.value,
     health_goals: healthGoal.value,
   }
-  localStorage.setItem(PROFILE_KEY, JSON.stringify(profile))
+  profileStore.save(profile)
   ElMessage.success('偏好已保存')
 }
 
 function reset(): void {
-  localStorage.removeItem(PROFILE_KEY)
-  budget.value = 20
+  profileStore.reset()
+  budget.value = profileStore.budget
   flavor.value = ''
   healthGoal.value = ''
   ElMessage.info('已恢复默认')
 }
-
-onMounted(load)
 
 defineExpose({ save })
 </script>
 
 <template>
   <div class="profile-form">
-    <el-form label-width="96px">
-      <el-form-item label="每餐预算">
-        <el-input-number v-model="budget" :min="1" :max="100" />
+    <div class="pf-section">
+      <div class="pf-title"><el-icon><Wallet /></el-icon>每餐预算</div>
+      <div class="pf-body budget-row">
+        <el-slider v-model="budget" :min="1" :max="100" class="pf-slider" />
+        <el-input-number v-model="budget" :min="1" :max="100" size="small" />
         <span class="unit">元</span>
-      </el-form-item>
+      </div>
+    </div>
 
-      <el-form-item label="口味偏好">
+    <div class="pf-section">
+      <div class="pf-title"><el-icon><Sugar /></el-icon>口味偏好</div>
+      <div class="pf-body">
         <el-input
           v-model="flavor"
           placeholder="如：清淡,辣,甜（逗号分隔）"
           clearable
         />
-      </el-form-item>
+      </div>
+    </div>
 
-      <el-form-item label="健康目标">
-        <el-select v-model="healthGoal" placeholder="选填" clearable style="width: 200px">
+    <div class="pf-section">
+      <div class="pf-title"><el-icon><FirstAidKit /></el-icon>健康目标</div>
+      <div class="pf-body">
+        <el-select v-model="healthGoal" placeholder="选填" clearable style="width: 220px">
           <el-option v-for="g in GOALS" :key="g" :label="g" :value="g" />
         </el-select>
-      </el-form-item>
+      </div>
+    </div>
 
-      <el-form-item>
-        <el-button type="primary" @click="save">保存偏好</el-button>
-        <el-button @click="reset">重置</el-button>
-      </el-form-item>
-    </el-form>
+    <div class="pf-actions">
+      <el-button type="primary" @click="save">保存偏好</el-button>
+      <el-button @click="reset">重置</el-button>
+    </div>
 
-    <el-alert
-      type="info"
-      :closable="false"
-      show-icon
-      title="提示"
-      description="保存的偏好会以自然语言注入对话，例如：请按我的偏好推荐（清淡口味、控油目标、预算 20 元）。"
-    />
+    <div class="pf-preview">
+      <div class="pf-preview-title">💬 注入话术预览</div>
+      <div class="pf-preview-text">{{ preview }}</div>
+    </div>
   </div>
 </template>
 
 <style scoped>
+.profile-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.pf-section {
+  border: 1px solid var(--el-color-primary-light-8);
+  border-radius: 14px;
+  padding: 16px 18px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.pf-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  color: #303133;
+  margin-bottom: 14px;
+}
+
+.pf-title .el-icon {
+  color: var(--el-color-primary);
+  font-size: 18px;
+}
+
+.pf-body.budget-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pf-slider {
+  flex: 1;
+}
+
 .unit {
-  margin-left: 8px;
   color: #909399;
+  white-space: nowrap;
+}
+
+.pf-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.pf-preview {
+  border: 1px dashed var(--el-color-primary-light-7);
+  background: var(--el-color-primary-light-9);
+  border-radius: 12px;
+  padding: 12px 16px;
+}
+
+.pf-preview-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-color-primary);
+  margin-bottom: 6px;
+}
+
+.pf-preview-text {
+  font-size: 13px;
+  color: #606266;
+  line-height: 1.6;
 }
 </style>

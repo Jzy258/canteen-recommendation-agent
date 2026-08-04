@@ -1,11 +1,23 @@
 <script setup lang="ts">
 import { nextTick, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { ChatDotRound, Plus, User } from '@element-plus/icons-vue'
 import { chat, chatStream } from '@/api/chat'
-import type { ChatMessage, UserProfile } from '@/types/chat'
+import { parseDishes } from '@/utils/parseDishes'
+import { track } from '@/utils/analytics'
+import DishCard from '@/components/DishCard.vue'
+import { useChatStore } from '@/stores/chat'
+import { useProfileStore } from '@/stores/profile'
+import type { ChatMessage } from '@/types/chat'
 
-const SESSION_KEY = 'canteen.session_id'
-const PROFILE_KEY = 'canteen.profile'
+const chatStore = useChatStore()
+const profileStore = useProfileStore()
+
+const QUICK_PROMPTS = [
+  { label: '有什么菜？', icon: '🍽️' },
+  { label: '10 元预算推荐', icon: '💰' },
+  { label: '记录今天午餐', icon: '📝' },
+]
 
 const messages = ref<ChatMessage[]>([])
 const input = ref('')
@@ -14,32 +26,9 @@ const streaming = ref(false)
 const listRef = ref<HTMLElement>()
 let abortController: AbortController | null = null
 
-function getSessionId(): string {
-  return localStorage.getItem(SESSION_KEY) || ''
-}
-
-function saveSessionId(id: string): void {
-  localStorage.setItem(SESSION_KEY, id)
-}
-
-function loadProfile(): UserProfile | null {
-  const raw = localStorage.getItem(PROFILE_KEY)
-  if (!raw) return null
-  try {
-    return JSON.parse(raw) as UserProfile
-  } catch {
-    return null
-  }
-}
-
 function buildPrompt(text: string): string {
-  const p = loadProfile()
-  if (!p) return text
-  const parts: string[] = []
-  if (p.budget > 0) parts.push(`预算${p.budget}元`)
-  if (p.flavor_preferences) parts.push(`口味偏好${p.flavor_preferences}`)
-  if (p.health_goals) parts.push(`目标${p.health_goals}`)
-  return parts.length > 0 ? `（用户偏好：${parts.join('，')}）${text}` : text
+  const prefix = profileStore.injectedPrompt
+  return prefix ? `${prefix}${text}` : text
 }
 
 function scrollToBottom(): void {
@@ -66,8 +55,30 @@ function appendAssistant(text: string): void {
   scrollToBottom()
 }
 
+function nowTime(): string {
+  return new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+}
+
+function pushUserMessage(text: string): void {
+  messages.value.push({ role: 'user', content: text, time: nowTime() })
+}
+
+function finishAssistant(): void {
+  const last = messages.value[messages.value.length - 1]
+  if (!last || last.role !== 'assistant') return
+  if (!last.time) last.time = nowTime()
+  if (!last.dishes) last.dishes = parseDishes(last.content)
+  if (last.dishes.length) {
+    track('dish_expose', { count: last.dishes.length })
+  }
+}
+
+function fillPrompt(text: string): void {
+  input.value = text
+}
+
 async function sendByStream(text: string): Promise<'ok' | 'aborted' | 'failed'> {
-  const sid = getSessionId() || undefined
+  const sid = chatStore.sessionId || undefined
   const prompt = buildPrompt(text)
   abortController = new AbortController()
   let succeeded = false
@@ -76,7 +87,7 @@ async function sendByStream(text: string): Promise<'ok' | 'aborted' | 'failed'> 
       { message: prompt, session_id: sid },
       (event) => {
         if (event.type === 'session') {
-          saveSessionId(event.session_id)
+          chatStore.setSession(event.session_id)
         } else if (event.type === 'delta') {
           appendAssistant(event.content)
         } else if (event.type === 'done') {
@@ -100,7 +111,9 @@ async function send(): Promise<void> {
   }
   if (loading.value) return
 
-  messages.value.push({ role: 'user', content: text })
+  const startedAt = Date.now()
+  track('chat_send', { text })
+  pushUserMessage(text)
   input.value = ''
   loading.value = true
   scrollToBottom()
@@ -129,8 +142,8 @@ async function send(): Promise<void> {
   // 流式失败：回退到非流式 /chat
   if (status === 'failed') {
     try {
-      const res = await chat({ message: buildPrompt(text), session_id: getSessionId() || undefined })
-      saveSessionId(res.session_id)
+      const res = await chat({ message: buildPrompt(text), session_id: chatStore.sessionId || undefined })
+      chatStore.setSession(res.session_id)
       currentAssistant().content = res.reply
       status = 'ok'
     } catch (e: unknown) {
@@ -154,6 +167,8 @@ async function send(): Promise<void> {
       ElMessage.error('服务暂时不可用，请稍后再试')
     }
   }
+  finishAssistant()
+  track('chat_reply', { status, durationMs: Date.now() - startedAt })
 }
 
 function stop(): void {
@@ -164,7 +179,7 @@ function stop(): void {
 
 function startNewSession(): void {
   if (loading.value) stop()
-  localStorage.removeItem(SESSION_KEY)
+  chatStore.clearSession()
   messages.value = []
 }
 
@@ -178,28 +193,78 @@ function onEnter(): void {
     <el-card class="chat-card" shadow="never">
       <template #header>
         <div class="chat-header">
-          <span class="chat-title">食堂菜品推荐与营养分析 Agent</span>
-          <el-button size="small" @click="startNewSession">新会话</el-button>
+          <div class="chat-title">
+            <el-icon class="title-icon"><ChatDotRound /></el-icon>
+            <span>食堂菜品推荐与营养分析 Agent</span>
+          </div>
+          <el-button size="small" @click="startNewSession">
+            <el-icon style="margin-right: 4px"><Plus /></el-icon>
+            新会话
+          </el-button>
         </div>
       </template>
 
       <div ref="listRef" class="chat-list">
-        <el-empty
-          v-if="messages.length === 0"
-          description="你好！我是食堂点餐参谋，可以帮你查菜品营养、按预算推荐、记录摄入。"
-        />
+        <!-- 欢迎引导卡（B8） -->
+        <div v-if="messages.length === 0" class="chat-welcome">
+          <div class="welcome-title">你好！我是食堂点餐参谋 👋</div>
+          <div class="welcome-sub">
+            帮你查菜品营养、按预算推荐、记录每日摄入，点下方入口或直接输入
+          </div>
+          <div class="welcome-cards">
+            <div
+              v-for="q in QUICK_PROMPTS"
+              :key="q.label"
+              class="welcome-card"
+              @click="fillPrompt(q.label)"
+            >
+              <span class="welcome-icon">{{ q.icon }}</span>
+              <span class="welcome-label">{{ q.label }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 消息流（B6 头像 + 时间戳） -->
         <div
           v-for="(msg, idx) in messages"
           :key="idx"
           class="chat-row"
           :class="msg.role"
         >
-          <div class="chat-bubble">{{ msg.content }}</div>
+          <div v-if="msg.role === 'assistant'" class="chat-avatar assistant">🤖</div>
+          <div class="chat-body">
+            <div class="chat-time">{{ msg.time }}</div>
+            <div class="chat-bubble">{{ msg.content }}</div>
+            <div v-if="msg.dishes && msg.dishes.length" class="dish-grid">
+              <DishCard v-for="d in msg.dishes" :key="d.name" :dish="d" />
+            </div>
+          </div>
+          <div v-if="msg.role === 'user'" class="chat-avatar user">
+            <el-icon :size="17"><User /></el-icon>
+          </div>
         </div>
-        <div v-if="streaming" class="chat-cursor">▍</div>
+
+        <!-- 回复过程态（B9） -->
+        <div v-if="streaming" class="chat-thinking">
+          <span class="thinking-dot" />
+          <span>正在思考…</span>
+        </div>
       </div>
 
       <div class="chat-input">
+        <!-- 快捷提问 chips（B7） -->
+        <div class="chat-quick">
+          <button
+            v-for="q in QUICK_PROMPTS"
+            :key="q.label"
+            type="button"
+            class="quick-chip"
+            @click="fillPrompt(q.label)"
+          >
+            {{ q.label }}
+          </button>
+        </div>
+
         <el-input
           v-model="input"
           type="textarea"
@@ -238,6 +303,7 @@ function onEnter(): void {
   display: flex;
   flex-direction: column;
   flex: 1;
+  border-radius: 16px;
 }
 
 .chat-header {
@@ -247,7 +313,16 @@ function onEnter(): void {
 }
 
 .chat-title {
-  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.title-icon {
+  color: var(--el-color-primary);
+  font-size: 18px;
 }
 
 .chat-list {
@@ -257,9 +332,68 @@ function onEnter(): void {
   min-height: 0;
 }
 
+/* 欢迎引导卡（B8） */
+.chat-welcome {
+  text-align: center;
+  padding: 32px 8px 16px;
+}
+
+.welcome-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #303133;
+}
+
+.welcome-sub {
+  margin: 8px 0 20px;
+  color: #909399;
+  font-size: 13px;
+}
+
+.welcome-cards {
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.welcome-card {
+  width: 150px;
+  padding: 18px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--el-color-primary-light-8);
+  background: #fff;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.welcome-card:hover {
+  border-color: var(--el-color-primary);
+  transform: translateY(-3px);
+  box-shadow: 0 8px 20px rgba(50, 177, 108, 0.18);
+}
+
+.welcome-icon {
+  font-size: 26px;
+}
+
+.welcome-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+}
+
+/* 消息行（B6） */
 .chat-row {
   display: flex;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
+  align-items: flex-end;
+  gap: 10px;
 }
 
 .chat-row.user {
@@ -270,28 +404,87 @@ function onEnter(): void {
   justify-content: flex-start;
 }
 
+.chat-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.chat-avatar.assistant {
+  background: var(--el-color-primary-light-9);
+  border: 1px solid var(--el-color-primary-light-8);
+}
+
+.chat-avatar.user {
+  background: var(--el-color-primary);
+  color: #fff;
+}
+
+.chat-body {
+  display: flex;
+  flex-direction: column;
+  max-width: 78%;
+}
+
+.chat-row.user .chat-body {
+  align-items: flex-end;
+}
+
+.chat-time {
+  font-size: 11px;
+  color: #c0c4cc;
+  margin-bottom: 4px;
+  padding: 0 4px;
+}
+
 .chat-bubble {
-  max-width: 75%;
   padding: 10px 14px;
-  border-radius: 10px;
+  border-radius: 12px;
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 .chat-row.user .chat-bubble {
-  background: #409eff;
+  background: linear-gradient(135deg, #32b16c, #288e56);
   color: #fff;
+  border-bottom-right-radius: 4px;
 }
 
 .chat-row.assistant .chat-bubble {
   background: #f0f2f5;
   color: #303133;
+  border-bottom-left-radius: 4px;
 }
 
-.chat-cursor {
-  padding: 10px 14px;
-  color: #409eff;
+/* 菜品卡片网格（B5） */
+.dish-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+}
+
+/* 回复过程态（B9） */
+.chat-thinking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 4px;
+  color: #909399;
+  font-size: 13px;
+}
+
+.thinking-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--el-color-primary);
   animation: blink 1s step-start infinite;
 }
 
@@ -304,6 +497,31 @@ function onEnter(): void {
 .chat-input {
   border-top: 1px solid #e4e7ed;
   padding-top: 12px;
+}
+
+/* 快捷提问 chips（B7） */
+.chat-quick {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.quick-chip {
+  border: 1px solid var(--el-color-primary-light-8);
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.quick-chip:hover {
+  background: var(--el-color-primary);
+  color: #fff;
+  border-color: var(--el-color-primary);
 }
 
 .chat-actions {

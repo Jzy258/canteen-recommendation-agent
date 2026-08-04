@@ -1,5 +1,14 @@
 :root {
   color-scheme: light;
+
+  /* ===== 主题色：食堂健康绿 #32b16c ===== */
+  --el-color-primary: #32b16c;
+  --el-color-primary-light-3: #70c898;
+  --el-color-primary-light-5: #99d8b6;
+  --el-color-primary-light-7: #c2e8d3;
+  --el-color-primary-light-8: #d6efe2;
+  --el-color-primary-light-9: #ebf7f0;
+  --el-color-primary-dark-2: #288e56;
 }
 
 * {
@@ -23,6 +32,35 @@ body {
     'PingFang SC',
     'Microsoft YaHei',
     sans-serif;
-  background: #f5f7fa;
+  background: linear-gradient(180deg, #f0faf4 0%, #f5f7fa 220px, #f5f7fa 100%);
   color: #303133;
+}
+
+/* ===== D · 全局消息反馈风格统一 ===== */
+.el-message {
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+}
+
+/* ===== A3 · 卡片统一美化 ===== */
+.el-card {
+  border-radius: 16px;
+  border: 1px solid #eef3f0;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+}
+
+/* ===== A4 · 页面切换动效 ===== */
+.fade-slide-enter-active,
+.fade-slide-leave-active {
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.fade-slide-enter-from {
+  opacity: 0;
+  transform: translateY(12px);
+}
+
+.fade-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
 }
