@@ -5,6 +5,7 @@
 from tools.search import search_dish, get_all_dishes
 from tools.scoring import recommend
 from tools.optimizer import optimize_meal_tool
+from tools.meal_recommend import recommend_for_meal
 from tools.record import (
     record_meal,
     confirm_record,
@@ -29,6 +30,7 @@ ALL_TOOLS = [
     get_all_dishes,
     retrieve_dishes,
     recommend,
+    recommend_for_meal,
     optimize_meal_tool,
     optimize_meal_subagent,
     get_weather_recommendation,
