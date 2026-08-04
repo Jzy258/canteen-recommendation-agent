@@ -247,14 +247,16 @@ docs/C-工作计划.md
 docs/前端界面改进建议.md
 docs/前端企业级改进意见.md
 
+# Chroma vector DB
 backend/data/chroma_db/
-backend/data/metrics.json
-backend/data/canteen.db
-backend/data/adcode_cache.json
 
+# runtime metrics
+backend/data/metrics.json
+
+# adcode cache
+backend/data/adcode_cache.json
 
 # logs
 backend/logs/
 
 .idea
-
