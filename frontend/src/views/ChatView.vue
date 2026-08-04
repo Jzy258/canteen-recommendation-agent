@@ -252,8 +252,8 @@ function onEnter(): void {
       </div>
 
       <div class="chat-input">
-        <!-- 快捷提问 chips（B7） -->
-        <div class="chat-quick">
+        <!-- 快捷提问 chips（B7）：初始对话后才动态出现 -->
+        <div v-if="messages.length > 0" class="chat-quick">
           <button
             v-for="q in QUICK_PROMPTS"
             :key="q.label"
