@@ -59,7 +59,8 @@ class DatabaseInterface(ABC):
 
     @abstractmethod
     def add_meal_record(self, date: str, meal_time: str, dish_id: int,
-                        portion: float = 1.0) -> int:
+                        portion: float = 1.0,
+                        user_id: Optional[int] = None) -> int:
         ...
 
     @abstractmethod
@@ -92,51 +93,87 @@ class DatabaseInterface(ABC):
         ...
 
     @abstractmethod
-    def get_records_by_date(self, date: str) -> list[dict]:
+    def get_records_by_date(self, date: str,
+                            user_id: Optional[int] = None) -> list[dict]:
         ...
 
     @abstractmethod
     def get_records_in_range(self, start_date: str, end_date: str,
-                             meal_time: str = "") -> list[dict]:
+                             meal_time: str = "",
+                             user_id: Optional[int] = None) -> list[dict]:
         ...
 
     @abstractmethod
-    def get_daily_nutrition(self, date: str) -> list[dict]:
+    def get_daily_nutrition(self, date: str,
+                            user_id: Optional[int] = None) -> list[dict]:
         ...
 
     @abstractmethod
-    def get_day_total(self, date: str) -> Optional[dict]:
+    def get_day_total(self, date: str,
+                      user_id: Optional[int] = None) -> Optional[dict]:
         ...
 
     @abstractmethod
-    def get_weekly_nutrition(self, start_date: str, end_date: str) -> list[dict]:
+    def get_weekly_nutrition(self, start_date: str, end_date: str,
+                             user_id: Optional[int] = None) -> list[dict]:
         ...
 
     @abstractmethod
-    def get_weekly_summary(self, start_date: str, end_date: str) -> Optional[dict]:
+    def get_weekly_summary(self, start_date: str, end_date: str,
+                           user_id: Optional[int] = None) -> Optional[dict]:
         ...
 
     @abstractmethod
-    def get_weekly_trend(self, end_date: str = "", days: int = 7) -> list[dict]:
+    def get_weekly_trend(self, end_date: str = "", days: int = 7,
+                         user_id: Optional[int] = None) -> list[dict]:
         ...
 
     @abstractmethod
-    def get_user_profile(self) -> Optional[dict]:
+    def get_user_profile(self, user_id: Optional[int] = None) -> Optional[dict]:
         ...
 
     @abstractmethod
     def upsert_user_profile(self, budget: float = 0,
                             flavor_preferences: str = "",
                             dietary_restrictions: str = "",
-                            health_goals: str = "") -> int:
+                            health_goals: str = "",
+                            user_id: Optional[int] = None) -> int:
         ...
 
     @abstractmethod
-    def update_nutrition_summary(self, summary_json: str) -> bool:
+    def update_nutrition_summary(self, summary_json: str,
+                                 user_id: Optional[int] = None) -> bool:
         ...
 
     @abstractmethod
     def get_dishes_by_weather_tag(self, weather_type: str) -> list[dict]:
+        ...
+
+    # ---- v1.1 用户系统 ----
+
+    @abstractmethod
+    def create_user(self, username: str, password_hash: str,
+                    role: str = "user", display_name: str = "") -> int:
+        ...
+
+    @abstractmethod
+    def get_user_by_username(self, username: str) -> Optional[dict]:
+        ...
+
+    @abstractmethod
+    def get_user_by_id(self, user_id: int) -> Optional[dict]:
+        ...
+
+    @abstractmethod
+    def update_user_login(self, user_id: int) -> bool:
+        ...
+
+    @abstractmethod
+    def change_user_password(self, user_id: int, password_hash: str) -> bool:
+        ...
+
+    @abstractmethod
+    def set_user_status(self, user_id: int, status: int) -> bool:
         ...
 
 
@@ -148,6 +185,67 @@ class SQLiteDatabase(DatabaseInterface):
     def __init__(self, db_path: str = DB_PATH):
         self.db_path = db_path
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        self._ensure_schema()
+
+    def _ensure_schema(self):
+        """自动初始化：确保库结构完整且幂等。
+        - 老库（无 dish 表）→ 执行完整 schema
+        - 部分表已存在的旧库 → 先做 v1.1 迁移（加 user_id 列），再补建缺失对象，
+          避免 CREATE INDEX ON user_id 在旧列缺失时报错
+        - 新库 → 直接执行 schema"""
+        try:
+            with self._connect() as conn:
+                has_dish = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='dish'"
+                ).fetchone()
+                has_meal = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='meal_record'"
+                ).fetchone()
+                if has_dish is None:
+                    # 老库部分表存在时先迁移列，再执行完整 schema 建缺失对象
+                    if has_meal is not None:
+                        self._migrate_v11(conn)
+                    self.init_db()
+                    return
+                self._migrate_v11(conn)
+        except sqlite3.Error:
+            pass
+
+    def _migrate_v11(self, conn):
+        """v1.0 → v1.1 增量迁移：
+        - 确保 app_user 表存在（旧库无此表时创建）
+        - meal_record/user_profile 增加 user_id 列
+        幂等：先检查对象是否已存在，缺失才创建。"""
+        try:
+            # 1) app_user 表
+            tbl = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='app_user'"
+            ).fetchone()
+            if tbl is None:
+                conn.execute(
+                    """CREATE TABLE IF NOT EXISTS app_user (
+                        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                        username      TEXT    NOT NULL UNIQUE,
+                        password_hash TEXT    NOT NULL,
+                        role          TEXT    NOT NULL DEFAULT 'user'
+                                        CHECK (role IN ('admin','user')),
+                        display_name  TEXT    DEFAULT '',
+                        status        INTEGER NOT NULL DEFAULT 1,
+                        created_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+                        last_login_at TEXT
+                    )""")
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_app_user_username ON app_user(username)")
+            # 2) user_id 列（SQLite 限制：ADD COLUMN 不能带 REFERENCES，故仅加列）
+            for table, column in (("meal_record", "user_id"),
+                                  ("user_profile", "user_id")):
+                cols = {r["name"] for r in conn.execute(
+                    f"PRAGMA table_info({table})").fetchall()}
+                if column not in cols:
+                    conn.execute(
+                        f"ALTER TABLE {table} ADD COLUMN {column} INTEGER")
+        except sqlite3.Error:
+            pass
 
     @contextmanager
     def _connect(self):
@@ -248,11 +346,12 @@ class SQLiteDatabase(DatabaseInterface):
     # ---- meal_record ----
 
     def add_meal_record(self, date: str, meal_time: str, dish_id: int,
-                        portion: float = 1.0) -> int:
-        sql = """INSERT INTO meal_record (date, meal_time, dish_id, portion)
-                 VALUES (?, ?, ?, ?)"""
+                        portion: float = 1.0,
+                        user_id: Optional[int] = None) -> int:
+        sql = """INSERT INTO meal_record (date, meal_time, dish_id, portion, user_id)
+                 VALUES (?, ?, ?, ?, ?)"""
         with self._connect() as conn:
-            cur = conn.execute(sql, (date, meal_time, dish_id, portion))
+            cur = conn.execute(sql, (date, meal_time, dish_id, portion, user_id))
             return cur.lastrowid
 
     def confirm_meal_record(self, record_id: int) -> bool:
@@ -261,8 +360,15 @@ class SQLiteDatabase(DatabaseInterface):
                 "UPDATE meal_record SET confirmed = 1 WHERE id = ? AND confirmed = 0",
                 (record_id,))
             ok = cur.rowcount > 0
+            uid = None
+            if ok:
+                row = conn.execute(
+                    "SELECT user_id FROM meal_record WHERE id = ?",
+                    (record_id,)).fetchone()
+                if row:
+                    uid = row["user_id"]
         if ok:
-            self._refresh_profile_summary()
+            self._refresh_profile_summary(user_id=uid)
         return ok
 
     def reject_meal_record(self, record_id: int) -> bool:
@@ -283,8 +389,12 @@ class SQLiteDatabase(DatabaseInterface):
                 f"WHERE id IN ({placeholders}) AND confirmed = 0",
                 record_ids)
             n = cur.rowcount
+            uids = {r["user_id"] for r in conn.execute(
+                f"SELECT DISTINCT user_id FROM meal_record WHERE id IN ({placeholders})",
+                record_ids).fetchall()}
         if n > 0:
-            self._refresh_profile_summary()
+            for uid in uids:
+                self._refresh_profile_summary(user_id=uid)
         return n
 
     def reject_records(self, record_ids: list[int]) -> int:
@@ -331,14 +441,13 @@ class SQLiteDatabase(DatabaseInterface):
                 (record_id,)).fetchone()
         return dict(row) if row else None
 
-    def _refresh_profile_summary(self):
-        """确认记录后，重算已确认记录的营养汇总并写入 user_profile。
+    def _refresh_profile_summary(self, user_id: Optional[int] = None):
+        """确认记录后，重算该用户已确认记录的营养汇总并写入 user_profile。
         汇总内容：总摄入、日均营养、按餐次平均、菜品多样性、近7天趋势。
         与 B 的 store.summarize_nutrition 协调：仅更新本模块的统计键，
         保留既有 summary 中的其他键（如 B 写入的 days/week_key），避免互相覆盖。"""
         with self._connect() as conn:
-            row = conn.execute(
-                """SELECT
+            sql = """SELECT
                        COUNT(*) AS record_count,
                        COUNT(DISTINCT date) AS day_count,
                        COUNT(DISTINCT d.id) AS dish_kind_count,
@@ -347,12 +456,17 @@ class SQLiteDatabase(DatabaseInterface):
                        ROUND(SUM(d.carbs * mr.portion), 1) AS total_carbs,
                        ROUND(SUM(d.fat * mr.portion), 1) AS total_fat
                    FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
-                   WHERE mr.confirmed = 1""").fetchone()
+                   WHERE mr.confirmed = 1"""
+            params: list = []
+            if user_id is not None:
+                sql += " AND mr.user_id = ?"
+                params.append(user_id)
+            row = conn.execute(sql, params).fetchone()
 
         import json
         # 读取既有 summary，保留 A 不管理的键（协调 B 的 summarize_nutrition）
         existing = {}
-        prof = self.get_user_profile()
+        prof = self.get_user_profile(user_id=user_id)
         if prof and prof.get("nutrition_summary"):
             try:
                 existing = json.loads(prof["nutrition_summary"])
@@ -377,50 +491,64 @@ class SQLiteDatabase(DatabaseInterface):
                 "avg_carbs": round(row["total_carbs"] / days, 1),
                 "avg_fat": round(row["total_fat"] / days, 1),
             }
-            summary["meal_averages"] = self._meal_averages()
-            summary["recent_trend"] = self._recent_trend()
+            summary["meal_averages"] = self._meal_averages(user_id)
+            summary["recent_trend"] = self._recent_trend(user_id=user_id)
         merged.update(summary)  # A 的键覆盖，B 的键保留
 
-        if self.get_user_profile() is None:
-            self.upsert_user_profile()
-        self.update_nutrition_summary(json.dumps(merged, ensure_ascii=False))
+        if self.get_user_profile(user_id=user_id) is None:
+            self.upsert_user_profile(user_id=user_id)
+        self.update_nutrition_summary(json.dumps(merged, ensure_ascii=False),
+                                      user_id=user_id)
 
-    def _meal_averages(self) -> dict:
+    def _meal_averages(self, user_id: Optional[int] = None) -> dict:
         """按餐次统计平均摄入。"""
         with self._connect() as conn:
-            rows = conn.execute(
-                """SELECT mr.meal_time,
+            sql = """SELECT mr.meal_time,
                           ROUND(SUM(d.calories * mr.portion) / COUNT(DISTINCT mr.date), 1) AS avg_calories
                    FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
-                   WHERE mr.confirmed = 1
-                   GROUP BY mr.meal_time""").fetchall()
+                   WHERE mr.confirmed = 1"""
+            params: list = []
+            if user_id is not None:
+                sql += " AND mr.user_id = ?"
+                params.append(user_id)
+            sql += " GROUP BY mr.meal_time"
+            rows = conn.execute(sql, params).fetchall()
         return {r["meal_time"]: r["avg_calories"] for r in rows}
 
-    def _recent_trend(self, days: int = 7) -> list[dict]:
+    def _recent_trend(self, days: int = 7,
+                      user_id: Optional[int] = None) -> list[dict]:
         """最近 N 天每日热量摄入（仅含实际有记录的天）。"""
         with self._connect() as conn:
-            rows = conn.execute(
-                """SELECT mr.date,
+            sql = """SELECT mr.date,
                           ROUND(SUM(d.calories * mr.portion), 1) AS calories
                    FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
-                   WHERE mr.confirmed = 1
-                   GROUP BY mr.date
-                   ORDER BY mr.date DESC LIMIT ?""",
-                (days,)).fetchall()
+                   WHERE mr.confirmed = 1"""
+            params: list = []
+            if user_id is not None:
+                sql += " AND mr.user_id = ?"
+                params.append(user_id)
+            sql += " GROUP BY mr.date ORDER BY mr.date DESC LIMIT ?"
+            params.append(days)
+            rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in reversed(rows)]
 
-    def get_records_by_date(self, date: str) -> list[dict]:
+    def get_records_by_date(self, date: str,
+                            user_id: Optional[int] = None) -> list[dict]:
+        sql = """SELECT mr.*, d.name AS dish_name, d.calories, d.protein, d.carbs, d.fat
+                 FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
+                 WHERE mr.date = ? AND mr.confirmed = 1"""
+        params: list = [date]
+        if user_id is not None:
+            sql += " AND mr.user_id = ?"
+            params.append(user_id)
+        sql += " ORDER BY mr.meal_time"
         with self._connect() as conn:
-            rows = conn.execute(
-                """SELECT mr.*, d.name AS dish_name, d.calories, d.protein, d.carbs, d.fat
-                   FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
-                   WHERE mr.date = ? AND mr.confirmed = 1
-                   ORDER BY mr.meal_time""",
-                (date,)).fetchall()
+            rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
     def get_records_in_range(self, start_date: str, end_date: str,
-                             meal_time: str = "") -> list[dict]:
+                             meal_time: str = "",
+                             user_id: Optional[int] = None) -> list[dict]:
         """返回 [start_date, end_date] 内已确认的饮食记录，可按餐次过滤。"""
         sql = ("""SELECT mr.*, d.name AS dish_name, d.calories, d.protein,
                           d.carbs, d.fat, d.price, d.category
@@ -430,37 +558,98 @@ class SQLiteDatabase(DatabaseInterface):
         if meal_time:
             sql += " AND mr.meal_time = ?"
             params.append(meal_time)
+        if user_id is not None:
+            sql += " AND mr.user_id = ?"
+            params.append(user_id)
         sql += " ORDER BY mr.date DESC, mr.meal_time, mr.id"
         with self._connect() as conn:
             rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
-    def get_daily_nutrition(self, date: str) -> list[dict]:
+    def get_daily_nutrition(self, date: str,
+                            user_id: Optional[int] = None) -> list[dict]:
         with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM v_daily_nutrition WHERE date = ? ORDER BY meal_time",
-                (date,)).fetchall()
+            if user_id is None:
+                rows = conn.execute(
+                    "SELECT * FROM v_daily_nutrition WHERE date = ? ORDER BY meal_time",
+                    (date,)).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT mr.meal_time,
+                              SUM(d.calories * mr.portion) AS total_calories,
+                              SUM(d.protein * mr.portion) AS total_protein,
+                              SUM(d.carbs * mr.portion) AS total_carbs,
+                              SUM(d.fat * mr.portion) AS total_fat,
+                              COUNT(DISTINCT mr.id) AS dish_count
+                       FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
+                       WHERE mr.confirmed = 1 AND mr.date = ? AND mr.user_id = ?
+                       GROUP BY mr.meal_time ORDER BY mr.meal_time""",
+                    (date, user_id)).fetchall()
         return [dict(r) for r in rows]
 
-    def get_day_total(self, date: str) -> Optional[dict]:
+    def get_day_total(self, date: str,
+                      user_id: Optional[int] = None) -> Optional[dict]:
         with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM v_day_total WHERE date = ?",
-                (date,)).fetchone()
+            if user_id is None:
+                row = conn.execute(
+                    "SELECT * FROM v_day_total WHERE date = ?",
+                    (date,)).fetchone()
+            else:
+                row = conn.execute(
+                    """SELECT mr.date,
+                              SUM(d.calories * mr.portion) AS total_calories,
+                              SUM(d.protein * mr.portion) AS total_protein,
+                              SUM(d.carbs * mr.portion) AS total_carbs,
+                              SUM(d.fat * mr.portion) AS total_fat,
+                              COUNT(DISTINCT mr.id) AS dish_count
+                       FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
+                       WHERE mr.confirmed = 1 AND mr.date = ? AND mr.user_id = ?
+                       GROUP BY mr.date""",
+                    (date, user_id)).fetchone()
         return dict(row) if row else None
 
-    def get_weekly_nutrition(self, start_date: str, end_date: str) -> list[dict]:
+    def get_weekly_nutrition(self, start_date: str, end_date: str,
+                             user_id: Optional[int] = None) -> list[dict]:
         with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM v_weekly_nutrition WHERE date BETWEEN ? AND ? ORDER BY date",
-                (start_date, end_date)).fetchall()
+            if user_id is None:
+                rows = conn.execute(
+                    "SELECT * FROM v_weekly_nutrition WHERE date BETWEEN ? AND ? ORDER BY date",
+                    (start_date, end_date)).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT strftime('%Y-%W', mr.date) AS week_key, mr.date,
+                              SUM(d.calories * mr.portion) AS total_calories,
+                              SUM(d.protein * mr.portion) AS total_protein,
+                              SUM(d.carbs * mr.portion) AS total_carbs,
+                              SUM(d.fat * mr.portion) AS total_fat
+                       FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
+                       WHERE mr.confirmed = 1 AND mr.date BETWEEN ? AND ? AND mr.user_id = ?
+                       GROUP BY mr.date ORDER BY mr.date""",
+                    (start_date, end_date, user_id)).fetchall()
         return [dict(r) for r in rows]
 
-    def get_weekly_summary(self, start_date: str, end_date: str) -> Optional[dict]:
+    def get_weekly_summary(self, start_date: str, end_date: str,
+                           user_id: Optional[int] = None) -> Optional[dict]:
         with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM v_week_summary WHERE start_date >= ? AND end_date <= ?",
-                (start_date, end_date)).fetchall()
+            if user_id is None:
+                rows = conn.execute(
+                    "SELECT * FROM v_week_summary WHERE start_date >= ? AND end_date <= ?",
+                    (start_date, end_date)).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT strftime('%Y-%W', mr.date) AS week_key,
+                              MIN(mr.date) AS start_date,
+                              MAX(mr.date) AS end_date,
+                              SUM(d.calories * mr.portion) AS total_calories,
+                              SUM(d.protein * mr.portion) AS total_protein,
+                              SUM(d.carbs * mr.portion) AS total_carbs,
+                              SUM(d.fat * mr.portion) AS total_fat,
+                              COUNT(DISTINCT mr.date) AS day_count,
+                              COUNT(DISTINCT mr.id) AS dish_count
+                       FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
+                       WHERE mr.confirmed = 1 AND mr.date BETWEEN ? AND ? AND mr.user_id = ?
+                       GROUP BY week_key ORDER BY week_key""",
+                    (start_date, end_date, user_id)).fetchall()
         result = [dict(r) for r in rows]
         if not result:
             return None
@@ -477,7 +666,8 @@ class SQLiteDatabase(DatabaseInterface):
         }
         return agg
 
-    def get_weekly_trend(self, end_date: str = "", days: int = 7) -> list[dict]:
+    def get_weekly_trend(self, end_date: str = "", days: int = 7,
+                         user_id: Optional[int] = None) -> list[dict]:
         """返回 [end_date-days+1, end_date] 窗口内每天的营养合计。
         缺失日期补零，保证连续 days 天的序列，方便前端画趋势图。"""
         from datetime import date, datetime, timedelta
@@ -499,9 +689,22 @@ class SQLiteDatabase(DatabaseInterface):
         start = end - timedelta(days=days - 1)
 
         with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM v_day_total WHERE date BETWEEN ? AND ? ORDER BY date",
-                (start.isoformat(), end.isoformat())).fetchall()
+            if user_id is None:
+                rows = conn.execute(
+                    "SELECT * FROM v_day_total WHERE date BETWEEN ? AND ? ORDER BY date",
+                    (start.isoformat(), end.isoformat())).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT mr.date,
+                              SUM(d.calories * mr.portion) AS total_calories,
+                              SUM(d.protein * mr.portion) AS total_protein,
+                              SUM(d.carbs * mr.portion) AS total_carbs,
+                              SUM(d.fat * mr.portion) AS total_fat,
+                              COUNT(DISTINCT mr.id) AS dish_count
+                       FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
+                       WHERE mr.confirmed = 1 AND mr.date BETWEEN ? AND ? AND mr.user_id = ?
+                       GROUP BY mr.date ORDER BY mr.date""",
+                    (start.isoformat(), end.isoformat(), user_id)).fetchall()
 
         day_map = {r["date"]: dict(r) for r in rows}
         trend = []
@@ -519,22 +722,73 @@ class SQLiteDatabase(DatabaseInterface):
             })
         return trend
 
-    # ---- user_profile ----
+    # ---- v1.1 app_user ----
 
-    def get_user_profile(self) -> Optional[dict]:
+    def create_user(self, username: str, password_hash: str,
+                    role: str = "user", display_name: str = "") -> int:
+        sql = ("INSERT INTO app_user (username, password_hash, role, display_name) "
+               "VALUES (?, ?, ?, ?)")
+        with self._connect() as conn:
+            cur = conn.execute(sql, (username, password_hash, role, display_name))
+            return cur.lastrowid
+
+    def get_user_by_username(self, username: str) -> Optional[dict]:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT * FROM user_profile ORDER BY id DESC LIMIT 1").fetchone()
+                "SELECT * FROM app_user WHERE username = ?", (username,)).fetchone()
+        return dict(row) if row else None
+
+    def get_user_by_id(self, user_id: int) -> Optional[dict]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM app_user WHERE id = ?", (user_id,)).fetchone()
+        return dict(row) if row else None
+
+    def update_user_login(self, user_id: int) -> bool:
+        now = "datetime('now', 'localtime')"
+        with self._connect() as conn:
+            cur = conn.execute(
+                f"UPDATE app_user SET last_login_at = {now} WHERE id = ?",
+                (user_id,))
+            return cur.rowcount > 0
+
+    def change_user_password(self, user_id: int, password_hash: str) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE app_user SET password_hash = ? WHERE id = ?",
+                (password_hash, user_id))
+            return cur.rowcount > 0
+
+    def set_user_status(self, user_id: int, status: int) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE app_user SET status = ? WHERE id = ?",
+                (status, user_id))
+            return cur.rowcount > 0
+
+    # ---- user_profile ----
+
+    def get_user_profile(self, user_id: Optional[int] = None) -> Optional[dict]:
+        """读取用户画像。user_id=None 时取最近一条（兼容匿名/历史数据）。"""
+        with self._connect() as conn:
+            if user_id is None:
+                row = conn.execute(
+                    "SELECT * FROM user_profile ORDER BY id DESC LIMIT 1").fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT * FROM user_profile WHERE user_id = ? ORDER BY id DESC LIMIT 1",
+                    (user_id,)).fetchone()
         return dict(row) if row else None
 
     def upsert_user_profile(self, budget: float = 0,
                             flavor_preferences: str = "",
                             dietary_restrictions: str = "",
-                            health_goals: str = "") -> int:
+                            health_goals: str = "",
+                            user_id: Optional[int] = None) -> int:
         """保存/更新用户画像。
         仅更新传入的非空字段；空字段保留原值，避免部分更新时丢数据。
-        """
-        existing = self.get_user_profile()
+        user_id 指定时按用户 upsert；为 None 时兼容旧逻辑（最近一条）。"""
+        existing = self.get_user_profile(user_id=user_id)
         now = "datetime('now', 'localtime')"
         if existing:
             # 合并：只覆盖非空入参，其余保留已有值
@@ -555,15 +809,17 @@ class SQLiteDatabase(DatabaseInterface):
                                    existing["id"]))
                 return existing["id"]
         else:
-            sql = """INSERT INTO user_profile (budget, flavor_preferences, dietary_restrictions, health_goals)
-                     VALUES (?, ?, ?, ?)"""
+            sql = """INSERT INTO user_profile
+                     (budget, flavor_preferences, dietary_restrictions, health_goals, user_id)
+                     VALUES (?, ?, ?, ?, ?)"""
             with self._connect() as conn:
                 cur = conn.execute(sql, (budget, flavor_preferences,
-                                         dietary_restrictions, health_goals))
+                                         dietary_restrictions, health_goals, user_id))
                 return cur.lastrowid
 
-    def update_nutrition_summary(self, summary_json: str) -> bool:
-        existing = self.get_user_profile()
+    def update_nutrition_summary(self, summary_json: str,
+                                 user_id: Optional[int] = None) -> bool:
+        existing = self.get_user_profile(user_id=user_id)
         if not existing:
             return False
         now = "datetime('now', 'localtime')"

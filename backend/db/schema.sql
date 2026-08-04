@@ -1,9 +1,24 @@
 -- ============================================================
 -- 食堂菜品推荐与营养分析 Agent — SQLite Schema
--- 版本：v1.0
+-- 版本：v1.1（新增用户系统：app_user 表；meal_record/user_profile 增加 user_id）
 -- 所有者：A · 数据与算法
 -- 说明：本 schema 为唯一来源，B 的 store/record 工具只读此 schema
 -- ============================================================
+
+-- 0. app_user — 用户账号（v1.1 新增）
+CREATE TABLE IF NOT EXISTS app_user (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT    NOT NULL UNIQUE,               -- 登录名（唯一）
+    password_hash TEXT    NOT NULL,                      -- 密码哈希（PBKDF2-SHA256，salt 内嵌）
+    role          TEXT    NOT NULL DEFAULT 'user'        -- 角色：admin / user
+                         CHECK (role IN ('admin','user')),
+    display_name  TEXT    DEFAULT '',                    -- 昵称
+    status        INTEGER NOT NULL DEFAULT 1,            -- 1=启用 0=禁用
+    created_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    last_login_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_user_username ON app_user(username);
 
 -- 1. dish — 菜品库
 CREATE TABLE IF NOT EXISTS dish (
@@ -57,12 +72,14 @@ CREATE TABLE IF NOT EXISTS meal_record (
     dish_id         INTEGER NOT NULL REFERENCES dish(id) ON DELETE CASCADE,
     portion         REAL    NOT NULL DEFAULT 1.0,         -- 份量系数，1.0 = 1份
     confirmed       INTEGER NOT NULL DEFAULT 0,           -- HITL 状态：0=待确认, 1=已确认, -1=已拒绝
-    created_at      TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+    user_id         INTEGER REFERENCES app_user(id) ON DELETE SET NULL,  -- v1.1 记录归属用户（NULL=匿名/历史）
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_meal_record_date      ON meal_record(date);
 CREATE INDEX IF NOT EXISTS idx_meal_record_confirmed ON meal_record(confirmed);
 CREATE INDEX IF NOT EXISTS idx_meal_record_dish      ON meal_record(dish_id);
+CREATE INDEX IF NOT EXISTS idx_meal_record_user      ON meal_record(user_id);
 
 
 -- 5. user_profile — 用户画像（长期记忆）
@@ -74,9 +91,12 @@ CREATE TABLE IF NOT EXISTS user_profile (
     health_goals            TEXT    DEFAULT '',           -- 营养目标：高蛋白/控油/控糖/增肌/减脂
     -- 历史营养汇总（JSON），如 {"avg_calories": 650, "avg_protein": 28, ...}
     nutrition_summary       TEXT    DEFAULT '{}',
-    created_at              TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
-    updated_at              TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+    user_id                 INTEGER REFERENCES app_user(id) ON DELETE CASCADE,  -- v1.1 画像归属用户（NULL=匿名/历史）
+    created_at              TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    updated_at              TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
 );
+
+CREATE INDEX IF NOT EXISTS idx_user_profile_user ON user_profile(user_id);
 
 
 -- ============================================================

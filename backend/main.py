@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import StreamingResponse
@@ -20,6 +20,7 @@ from middleware import (RequestMetricsMiddleware, add_tokens, get_metrics,
                         count_tokens, count_messages, clean_markdown,
                         setup_logging, get_logger)
 from version import APP_NAME, VERSION
+from auth import auth_router, get_optional_user
 
 # 统一日志系统（backend/logs，按天+大小滚动）
 setup_logging()
@@ -38,6 +39,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(RequestMetricsMiddleware)
+
+# 用户系统：认证接口（/auth/*）
+app.include_router(auth_router)
 
 # 挂载本地 swagger-ui 静态资源
 app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
@@ -90,10 +94,13 @@ def metrics():
 
 
 @app.get("/trend")
-def trend(days: int = 7, end_date: str = ""):
-    """营养摄入趋势：连续 N 天每日营养合计（缺失日期补零），供前端趋势图。"""
+def trend(days: int = 7, end_date: str = "",
+          user: dict | None = Depends(get_optional_user)):
+    """营养摄入趋势：连续 N 天每日营养合计（缺失日期补零），供前端趋势图。
+    登录用户仅返回本人数据；游客返回全部。"""
     from db import get_db
-    return get_db().get_weekly_trend(end_date=end_date, days=days)
+    uid = user["id"] if user else None
+    return get_db().get_weekly_trend(end_date=end_date, days=days, user_id=uid)
 
 
 @app.get("/location")
@@ -107,15 +114,19 @@ def location():
 
 
 @app.get("/records")
-def records(start_date: str = "", end_date: str = "", meal_time: str = ""):
-    """历史饮食记录：默认最近 30 天，可按餐次过滤（breakfast/lunch/dinner/other）。"""
+def records(start_date: str = "", end_date: str = "", meal_time: str = "",
+            user: dict | None = Depends(get_optional_user)):
+    """历史饮食记录：默认最近 30 天，可按餐次过滤（breakfast/lunch/dinner/other）。
+    登录用户仅返回本人记录；游客返回全部。"""
     from datetime import date, timedelta
     from db import get_db
     if not end_date:
         end_date = date.today().isoformat()
     if not start_date:
         start_date = (date.fromisoformat(end_date) - timedelta(days=29)).isoformat()
-    return get_db().get_records_in_range(start_date, end_date, meal_time)
+    uid = user["id"] if user else None
+    return get_db().get_records_in_range(start_date, end_date, meal_time,
+                                         user_id=uid)
 
 
 @app.post("/chat", response_model=ChatResponse)
