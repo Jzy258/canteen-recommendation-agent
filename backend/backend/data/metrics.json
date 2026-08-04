@@ -1,10 +1,11 @@
 {
-  "requests": 9,
+  "requests": 14,
   "errors": 0,
-  "total_time_ms": 25.3,
-  "total_tokens": 0,
+  "total_time_ms": 72019.59,
+  "total_tokens": 343,
   "by_path": {
-    "/trend": 9
+    "/trend": 12,
+    "/chat/stream": 2
   },
-  "updated_at": "2026-08-04T10:11:16"
+  "updated_at": "2026-08-04T10:21:17"
 }
