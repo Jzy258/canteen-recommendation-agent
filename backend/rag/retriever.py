@@ -184,7 +184,9 @@ def get_retriever() -> ChromaDishRetriever:
     dishes = db.get_all_dishes()
     key = _content_key(dishes)
     if key not in _retriever_cache:
-        persist = os.getenv("CHROMA_DB_PATH", "backend/data/chroma_db")
+        default = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                               "data", "chroma_db")
+        persist = os.getenv("CHROMA_DB_PATH", default)
         logger.info("RAG 索引重建 | dishes=%s key=%s", len(dishes), key)
         _retriever_cache[key] = ChromaDishRetriever(dishes, persist_dir=persist)
     return _retriever_cache[key]

@@ -33,6 +33,7 @@ SYSTEM_PROMPT = (
     "and nutrition info. Use the search_dish tool to find dishes by name or keyword. "
     "Use get_all_dishes to list all available dishes. "
     "Use retrieve_dishes to search dishes by semantic/keyword description (fuzzy match). "
+    "Use get_dish_nutrition to get a single dish's nutrition (calories, protein, carbs, fat, price) by name. "
     "Use recommend to recommend dishes based on budget, flavor preference, and health goals. "
     "IMPORTANT: When the user asks 'what should I eat now' / 'recommend a meal' / '推荐吃什么' "
     "without specifying a meal, ALWAYS call recommend_for_meal — it automatically picks "

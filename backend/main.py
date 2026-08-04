@@ -96,6 +96,19 @@ def trend(days: int = 7, end_date: str = ""):
     return get_db().get_weekly_trend(end_date=end_date, days=days)
 
 
+@app.get("/dishes/{dish_name}")
+def dish_nutrition(dish_name: str):
+    """查询指定单菜的营养成分（热量/蛋白质/碳水/脂肪/价格）。
+    Args:
+        dish_name: 菜品名称（URL 编码），如 红烧肉。
+    """
+    from tools.nutrition import get_dish_nutrition
+    result = get_dish_nutrition.invoke({"dish_name": dish_name})
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
     if not req.message or not req.message.strip():

@@ -20,7 +20,9 @@ _stats = {
     "token_history": [],  # [{time, tokens}]
 }
 
-_STATS_FILE = os.getenv("METRICS_FILE", "backend/data/metrics.json")
+_BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_STATS_FILE = os.getenv("METRICS_FILE",
+                        os.path.join(_BACKEND_DIR, "data", "metrics.json"))
 _MAX_TOKEN_HISTORY = 1000  # 内存中保留的 token 记录条数上限
 
 
