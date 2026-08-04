@@ -16,10 +16,10 @@ logger = get_logger("canteen.weather")
 
 
 @tool
-def get_weather_recommendation(city: str = "北京") -> str:
+def get_weather_recommendation(city: str = "") -> str:
     """获取指定城市的当前天气，并给出对应推荐菜品方向（冷→热汤面，热→清淡）。
     Args:
-        city: 城市名，默认北京。
+        city: 城市名，留空时自动按 IP 定位所在城市。
     """
     try:
         data = get_weather(city)
