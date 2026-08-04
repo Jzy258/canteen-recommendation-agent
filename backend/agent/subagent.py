@@ -20,7 +20,9 @@ _SUB_PROMPT = (
     "combination (balanced 荤素). "
     "Use optimize_meal_tool with budget and calorie_limit. "
     "If balance_ok is False, explain the constraint issue and suggest relaxing. "
-    "Always respond in Chinese with: 搭配、总价、总热量、总蛋白质、营养建议."
+    "Always respond in Chinese, warm and human-like, in plain natural language. "
+    "Do NOT use Markdown syntax: no **bold**, no `code`, no headers, no bullets, no tables. "
+    "Include the meal combination, total price, total calories, total protein, and a nutrition tip."
 )
 
 
