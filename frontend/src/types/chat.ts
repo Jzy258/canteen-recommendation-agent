@@ -85,4 +85,6 @@ export interface UserProfile {
   budget: number
   flavor_preferences: string
   health_goals: string
+  /** 所在地区（城市），用于天气推荐 */
+  region?: string
 }

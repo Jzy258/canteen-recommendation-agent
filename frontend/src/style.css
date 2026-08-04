@@ -64,3 +64,8 @@ body {
   opacity: 0;
   transform: translateY(-8px);
 }
+
+.nav-logo {
+  display: flex;
+  justify-content: center;
+}

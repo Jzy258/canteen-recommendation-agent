@@ -9,7 +9,7 @@ import ProfileForm from '@/components/ProfileForm.vue'
       <template #header>
         <span class="profile-title">
           <el-icon><User /></el-icon>
-          我的偏好
+          偏好与设置
         </span>
       </template>
       <ProfileForm />
@@ -20,6 +20,8 @@ import ProfileForm from '@/components/ProfileForm.vue'
 <style scoped>
 .profile-page {
   max-width: 860px;
+  width: 100%;
+  box-sizing: border-box;
   margin: 0 auto;
   padding: 16px;
 }

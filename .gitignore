@@ -248,7 +248,7 @@ docs/前端界面改进建议.md
 docs/前端企业级改进意见.md
 
 # SQLite 数据库与运行时指标（init_db 生成，不入库）
-backend/data/*.db
+backend/data/canteen.db
 backend/data/metrics.json
 # 防御：误用相对路径产生的嵌套目录
 backend/backend/
@@ -263,3 +263,4 @@ backend/data/adcode_cache.json
 backend/logs/
 
 .idea
+backend/data/loc_cache.json

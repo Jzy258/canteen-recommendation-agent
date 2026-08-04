@@ -35,7 +35,7 @@ import { ChatDotRound, KnifeFork, Notebook, TrendCharts, User } from '@element-p
           </el-menu-item>
           <el-menu-item index="/profile">
             <span class="nav-logo"><el-icon><User /></el-icon></span>
-            <span class="nav-label">我的偏好</span>
+            <span class="nav-label">偏好与设置</span>
           </el-menu-item>
         </el-menu>
       </nav>
@@ -132,6 +132,11 @@ import { ChatDotRound, KnifeFork, Notebook, TrendCharts, User } from '@element-p
   font-size: 15px;
   vertical-align: middle;
   transition: all 0.2s;
+}
+
+/* 使 logo 内图标严格水平/垂直居中 */
+.app-nav .el-menu-item .nav-logo .el-icon {
+  margin: auto;
 }
 
 .app-nav .el-menu-item:hover .nav-logo {
