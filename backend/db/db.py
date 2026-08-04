@@ -5,7 +5,9 @@ from contextlib import contextmanager
 from typing import Optional
 
 
-DB_PATH = os.getenv("DB_PATH", "backend/data/canteen.db")
+# 默认 DB_PATH 基于 backend/ 包根目录解析（与运行目录无关，避免 backend/backend 嵌套）
+_BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_PATH = os.getenv("DB_PATH") or os.path.join(_BACKEND_ROOT, "data", "canteen.db")
 SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "schema.sql")
 
 

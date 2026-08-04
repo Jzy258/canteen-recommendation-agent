@@ -46,10 +46,7 @@ import { ChatDotRound, KnifeFork, Notebook, TrendCharts, User } from '@element-p
     <main class="app-main">
       <router-view v-slot="{ Component }">
         <transition name="fade-slide" mode="out-in">
-          <!-- KeepAlive：缓存页面组件，切换标签页不销毁（保留聊天消息/流式状态） -->
-          <keep-alive>
-            <component :is="Component" />
-          </keep-alive>
+          <component :is="Component" />
         </transition>
       </router-view>
     </main>
