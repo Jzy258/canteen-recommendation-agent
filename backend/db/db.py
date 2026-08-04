@@ -5,15 +5,7 @@ from contextlib import contextmanager
 from typing import Optional
 
 
-_BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-def _resolve_path(p: str) -> str:
-    """相对路径以 backend/ 为基准解析，避免受运行目录影响。"""
-    if os.path.isabs(p):
-        return p
-    return os.path.join(_BACKEND_DIR, p)
-
-DB_PATH = _resolve_path(os.getenv("DB_PATH", "data/canteen.db"))
+DB_PATH = os.getenv("DB_PATH", "backend/data/canteen.db")
 SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "schema.sql")
 
 

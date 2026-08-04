@@ -39,9 +39,7 @@ CITY_ADCODE = {
 }
 
 # adcode 缓存：内存 dict + 持久化 JSON 文件（避免每次查询都调地理编码接口）
-_BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_ADCODE_CACHE_FILE = os.getenv("ADCODE_CACHE_FILE",
-                               os.path.join(_BACKEND_DIR, "data", "adcode_cache.json"))
+_ADCODE_CACHE_FILE = os.getenv("ADCODE_CACHE_FILE", "backend/data/adcode_cache.json")
 _adcode_cache: dict[str, str] = {}
 _cache_lock = threading.Lock()
 
