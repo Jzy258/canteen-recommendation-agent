@@ -5,12 +5,13 @@
 主 Agent 将该子 Agent 包装为工具调用（agent 即工具），
 子 Agent 内部持有 optimize_meal_tool，输出最优搭配 + 营养汇总 + 建议。
 """
-import logging
-
 from langchain.agents import create_agent
 from langchain_core.tools import tool
 from llm.client import get_llm
+from middleware.logger_config import get_logger
 from tools.optimizer import optimize_meal_tool
+
+logger = get_logger("canteen.subagent")
 
 _SUB_TOOLS = [optimize_meal_tool]
 
@@ -57,7 +58,7 @@ def optimize_meal_subagent(budget: float, calorie_limit: float,
         return result["messages"][-1].content
     except Exception as e:
         # 子 Agent 依赖 LLM，失败时降级为直接调用组合优化工具
-        logging.warning("subagent failed (%s), fallback to optimize_meal_tool", e)
+        logger.warning("subagent 失败，降级 optimize_meal_tool | err=%s", e)
         r = optimize_meal_tool.invoke({"budget": budget, "calorie_limit": calorie_limit})
         if not r["dishes"]:
             return f"无法在约束内组成搭配：{r.get('reason', '')}"

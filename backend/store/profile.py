@@ -9,6 +9,9 @@
 import json
 
 from langchain_core.tools import tool
+from middleware.logger_config import get_logger
+
+logger = get_logger("canteen.store")
 
 
 def _db():
@@ -23,12 +26,15 @@ def get_profile() -> dict | None:
 def save_profile(budget: float = 0, flavor_preferences: str = "",
                  dietary_restrictions: str = "", health_goals: str = "") -> int:
     """持久化用户画像，返回 profile id。"""
-    return _db().upsert_user_profile(
+    pid = _db().upsert_user_profile(
         budget=budget,
         flavor_preferences=flavor_preferences,
         dietary_restrictions=dietary_restrictions,
         health_goals=health_goals,
     )
+    logger.info("用户画像保存 | id=%s budget=%s pref=%s goal=%s",
+                pid, budget, flavor_preferences, health_goals)
+    return pid
 
 
 def summarize_nutrition(days: int = 7) -> dict | None:

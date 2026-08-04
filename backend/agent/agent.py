@@ -1,11 +1,11 @@
 import functools
-import logging
 
 from langchain.agents import create_agent
 from llm.client import get_llm
+from middleware.logger_config import get_logger
 from tools.registry import ALL_TOOLS
 
-logger = logging.getLogger("canteen.tools")
+logger = get_logger("canteen.tools")
 
 
 def safe_tool(tool_obj):

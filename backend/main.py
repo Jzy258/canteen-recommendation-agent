@@ -1,11 +1,8 @@
 import asyncio
 import json
-import logging
 import os
 import uuid
 from dotenv import load_dotenv
-
-logger = logging.getLogger("canteen.agent")
 
 load_dotenv()
 
@@ -20,8 +17,13 @@ from langchain_core.messages import HumanMessage, AIMessage
 from agent.agent import create_agent_executor
 from agent.session import session_store
 from middleware import (RequestMetricsMiddleware, add_tokens, get_metrics,
-                        count_tokens, count_messages, clean_markdown)
+                        count_tokens, count_messages, clean_markdown,
+                        setup_logging, get_logger)
 from version import APP_NAME, VERSION
+
+# 统一日志系统（backend/logs，按天+大小滚动）
+setup_logging()
+logger = get_logger("canteen.app")
 
 # 静态目录：本地 swagger-ui 资源（避免依赖 jsdelivr CDN）
 _STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -97,10 +99,12 @@ def trend(days: int = 7, end_date: str = ""):
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
     if not req.message or not req.message.strip():
+        logger.warning("空消息被拒绝")
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
     session_id = req.session_id or str(uuid.uuid4())
     history = session_store.get(session_id)
+    logger.info("chat 请求 | session=%s | msg=%s", session_id, req.message[:200])
 
     try:
         messages = history + [HumanMessage(content=req.message)]
@@ -111,8 +115,11 @@ def chat(req: ChatRequest):
         in_tokens = count_tokens(req.message) + count_messages(history)
         out_tokens = count_tokens(reply)
         add_tokens(in_tokens + out_tokens)
+        logger.info("chat 成功 | session=%s | in_tokens=%s out_tokens=%s | reply_len=%s",
+                    session_id, in_tokens, out_tokens, len(reply))
     except Exception as e:
-        logger.exception("chat failed: %s", e)
+        logger.exception("chat 失败 | session=%s | msg=%s | err=%s",
+                         session_id, req.message[:200], e)
         reply = "抱歉，系统处理出错，请稍后再试或换一种问法。"
 
     # persist to memory (trim old turns)
@@ -124,13 +131,15 @@ def chat(req: ChatRequest):
 def _stream_reply(session_id: str, message: str):
     """流式生成回复，按字符切块 SSE 输出。"""
     history = session_store.get(session_id)
+    logger.info("chat/stream 请求 | session=%s | msg=%s", session_id, message[:200])
     try:
         messages = history + [HumanMessage(content=message)]
         result = agent.invoke({"messages": messages})
         reply = clean_markdown(result["messages"][-1].content)
         add_tokens(count_tokens(message) + count_tokens(reply))
+        logger.info("chat/stream 成功 | session=%s | reply_len=%s", session_id, len(reply))
     except Exception as e:
-        logger.exception("chat stream failed: %s", e)
+        logger.exception("chat/stream 失败 | session=%s | err=%s", session_id, e)
         reply = "抱歉，系统处理出错，请稍后再试或换一种问法。"
 
     session_store.append(session_id, message, reply)
