@@ -25,9 +25,10 @@ describe('trend api', () => {
     const res = await getTrend(7)
 
     const call = mockedGet.mock.calls[0]
+    const config = call[1] as { params?: { days?: number; end_date?: string } }
     expect(call[0]).toBe('/trend')
-    expect(call[1]?.params?.days).toBe(7)
-    expect(call[1]?.params?.end_date).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(config.params?.days).toBe(7)
+    expect(config.params?.end_date).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     expect(res).toHaveLength(2)
     expect(res[1].total_calories).toBe(500)
   })

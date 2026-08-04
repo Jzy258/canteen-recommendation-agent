@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { createPinia } from 'pinia'
 import ElementPlus from 'element-plus'
 import ChatView from './ChatView.vue'
 import type { StreamEvent } from '@/types/chat'
@@ -22,7 +23,7 @@ function emitStream(events: StreamEvent[]): void {
 
 function mountView() {
   return mount(ChatView, {
-    global: { plugins: [ElementPlus] },
+    global: { plugins: [ElementPlus, createPinia()] },
   })
 }
 

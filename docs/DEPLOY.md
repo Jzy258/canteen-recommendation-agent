@@ -1,6 +1,6 @@
 # 部署说明（DEPLOY）
 
-> 版本：v1.0　|　日期：2026-08-03
+> 版本：v1.1　|　日期：2026-08-03
 > 维护：C（B 协助 ollama 服务部分）
 
 ---
@@ -8,11 +8,12 @@
 ## 1. 部署架构
 
 ```
-frontend (nginx) ──▶ backend (FastAPI) ──▶ ollama (本地 LLM)
-                       │
-                       └──▶ mcp-weather (天气 MCP 独立进程)
+frontend (nginx :8080) ──▶ backend (FastAPI :8000) ──▶ ollama (本地 LLM)
+       │  /api 反代             │
+       │                        └──▶ mcp-weather (天气 MCP 独立进程)
 ```
 
+- `frontend`：nginx 托管 Vue 构建产物，SPA 路由回退，`/api/*` 反向代理到 backend
 - `backend`：FastAPI，承载 Agent / 工具 / RAG / 中间件 / Store
 - `ollama`：本地 LLM 服务（模型挂载卷，避免重复下载）
 - `mcp-weather`：天气 MCP 独立进程（mock 或高德真实 API）
@@ -32,9 +33,14 @@ docker compose -f docker/docker-compose.yml up -d --build
 docker compose -f docker/docker-compose.yml logs -f backend
 
 # 访问
-# 后端: http://localhost:8000/docs
+# 前端:  http://localhost:8080
+# 后端:  http://localhost:8000/docs
 # Ollama: http://localhost:11434
 ```
+
+> 前端容器构建时注入 `VITE_API_BASE=/api`，浏览器请求走同域 `/api`，
+> 由 nginx `proxy_pass http://backend:8000/` 去前缀转发到后端。
+> 端口映射：`8080:80`（nginx），如需换端口改 `docker-compose.yml`。
 
 ## 3. 本地开发（无 Docker）
 
@@ -54,6 +60,12 @@ ollama pull qwen2.5:7b
 
 # 天气 MCP（可选独立进程）
 uv run python backend/mcp/weather_server.py
+
+# 前端（Node 18+）
+cd frontend
+npm install
+npm run dev        # http://localhost:5173（dev 直连 http://localhost:8000）
+npm run build      # 产物在 dist/，可静态托管或 nginx 托管
 ```
 
 > 数据库初始化说明（A 拥有）：`init_db.py` 执行 `db/schema.sql` 建表，
@@ -82,7 +94,47 @@ uv run python backend/mcp/weather_server.py
 - 一律走 `.env`，`WEATHER_API_KEY` / `OPENAI_API_KEY` 不入镜像
 - compose 中天气 key 通过环境变量透传，不写死
 
-## 5. 环境变量
+### 4.6 前端刷新 /trend 等路由返回 404
+- 已配置 SPA 回退：nginx `try_files $uri $uri/ /index.html`（见 `docker/nginx.conf`）
+- 若自建 nginx 忘了此项，SPA 深链接刷新会 404
+
+### 4.7 流式回复在代理后不逐字显示
+- nginx 需对 `/api` 关闭缓冲：`proxy_buffering off; proxy_cache off;`（已配置）
+- 否则 `/chat/stream` 的 SSE 增量被 nginx 攒起来一次返回
+
+### 4.8 前端连不上后端
+- 生产（Docker）：前端通过 `/api` 反代，无需知道后端地址，检查 nginx 日志
+- 本地 dev：`VITE_API_BASE` 默认 `http://localhost:8000`，见 `frontend/.env.development`
+
+## 5. 远程 LLM / Embedding 服务器（可选）
+
+可将 LLM 与 embedding 独立部署到一台服务器，后端通过网络访问，不占用本机资源。
+
+**已部署：`119.45.135.201:11434`（Ubuntu · 4 核 · 15G · 无 GPU，CPU 推理）**
+
+```bash
+# 服务器上：安装 ollama（大陆服务器网络受限时用 github 代理，如 gh-proxy.com）
+curl -fsSL https://ollama.com/install.sh | sh   # 或从 gh-proxy 下载 tar.zst 手动安装
+
+# 配置 systemd 监听 0.0.0.0（OLLAMA_HOST=0.0.0.0:11434）后：
+ollama pull qwen2.5:7b    # LLM（CPU 推理，支持 function calling/tools）
+ollama pull bge-m3        # Embedding（1024 维）
+```
+
+- 腾讯云安全组需放行入站 `TCP 11434`
+- 验证：`curl http://<ip>:11434/api/version` → `{"version":"0.32.5"}`
+- 后端指向（`backend/.env`）：
+
+```
+OLLAMA_BASE_URL=http://119.45.135.201:11434
+OLLAMA_MODEL=qwen2.5:7b
+OLLAMA_EMBED_MODEL=bge-m3
+```
+
+> 注意：`qwen3.5:7b` 在 ollama 库不存在；`qwen2.5:7b` 为替代（同样支持工具调用）。
+> CPU 推理较慢，对话/工具调用每轮约 5~30s，演示时耐心等待或改小模型（`qwen2.5:3b`）。
+
+## 6. 环境变量
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
@@ -97,3 +149,5 @@ uv run python backend/mcp/weather_server.py
 | `GEOCODE_BASE_URL` | `https://restapi.amap.com/v3/geocode/geo` | 地理编码接口 |
 | `DB_PATH` | `backend/data/canteen.db` | SQLite 路径 |
 | `CHROMA_DB_PATH` | `backend/data/chroma_db` | Chroma 向量库路径 |
+| `VITE_API_BASE`（构建时） | `/api` | 前端后端地址；本地 dev 用 `http://localhost:8000` |
+| `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | RAG embedding 模型；远程用 `bge-m3` |

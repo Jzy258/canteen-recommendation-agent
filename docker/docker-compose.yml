@@ -1,7 +1,22 @@
 # 部署编排：frontend + backend + ollama + mcp-weather
 # B 负责 ollama 服务部分（模型挂载卷避免重复下载）
-# 启动：docker compose -f docker/docker-compose.yml up -d
+# C 负责 frontend 服务（nginx 托管 Vue 构建产物，/api 反代 backend）
+# 启动：docker compose -f docker/docker-compose.yml up -d --build
 services:
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
+      args:
+        VITE_API_BASE: /api
+    container_name: canteen-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    networks:
+      - canteen-net
+
   backend:
     build:
       context: ..

@@ -244,6 +244,8 @@ http-client.private.env.json
 docs/A-工作计划.md
 docs/具体计划（B角色）.md
 docs/C-工作计划.md
+docs/前端界面改进建议.md
+docs/前端企业级改进意见.md
 
 # Chroma vector DB
 backend/data/chroma_db/
