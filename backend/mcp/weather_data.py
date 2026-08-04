@@ -94,8 +94,14 @@ def _season(month: int) -> str:
     return "autumn"
 
 
-def get_weather(city: str = "北京") -> dict:
-    """获取城市温度与天气类型。优先真实 API，失败回退 mock。"""
+def get_weather(city: str = "") -> dict:
+    """获取城市温度与天气类型。优先真实 API，失败回退 mock。
+
+    city 为空时自动用 IP 定位所在城市；定位失败回退北京。
+    """
+    if not city:
+        city = auto_locate_city() or "北京"
+
     if os.getenv("WEATHER_API_KEY"):
         try:
             return _real_weather(city)
@@ -105,6 +111,16 @@ def get_weather(city: str = "北京") -> dict:
             result["note"] = f"real api failed: {e}, fallback to mock"
             return result
     return _mock_weather(city)
+
+
+def auto_locate_city(ip: str = "") -> str:
+    """通过 IP 定位获取所在城市名；失败返回空字符串。"""
+    try:
+        from mcp.location import locate_city
+        info = locate_city(ip)
+        return info.get("city", "") or ""
+    except Exception:
+        return ""
 
 
 def city_to_adcode(city: str) -> str:
