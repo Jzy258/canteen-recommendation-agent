@@ -32,5 +32,9 @@
     "vite": "^8.2.0",
     "vitest": "^4.0.10",
     "vue-tsc": "^3.3.8"
-  }
+  },
+  "description": "**所有者：C · 前端、测试与文档**",
+  "main": "index.js",
+  "author": "T-AG",
+  "license": "MIT"
 }

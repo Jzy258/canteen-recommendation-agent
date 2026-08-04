@@ -19,7 +19,8 @@ from langchain_core.messages import HumanMessage, AIMessage
 
 from agent.agent import create_agent_executor
 from agent.session import session_store
-from middleware import RequestMetricsMiddleware, add_tokens, get_metrics, count_tokens, count_messages
+from middleware import (RequestMetricsMiddleware, add_tokens, get_metrics,
+                        count_tokens, count_messages, clean_markdown)
 from version import APP_NAME, VERSION
 
 # 静态目录：本地 swagger-ui 资源（避免依赖 jsdelivr CDN）
@@ -105,7 +106,7 @@ def chat(req: ChatRequest):
         messages = history + [HumanMessage(content=req.message)]
         result = agent.invoke({"messages": messages})
         # last message is the final AI reply
-        reply = result["messages"][-1].content
+        reply = clean_markdown(result["messages"][-1].content)
         # Token 统计（tiktoken 精确计数，回退字符估算）
         in_tokens = count_tokens(req.message) + count_messages(history)
         out_tokens = count_tokens(reply)
@@ -126,7 +127,7 @@ def _stream_reply(session_id: str, message: str):
     try:
         messages = history + [HumanMessage(content=message)]
         result = agent.invoke({"messages": messages})
-        reply = result["messages"][-1].content
+        reply = clean_markdown(result["messages"][-1].content)
         add_tokens(count_tokens(message) + count_tokens(reply))
     except Exception as e:
         logger.exception("chat stream failed: %s", e)
