@@ -20,6 +20,8 @@ import ProfileForm from '@/components/ProfileForm.vue'
 <style scoped>
 .profile-page {
   max-width: 860px;
+  width: 100%;
+  box-sizing: border-box;
   margin: 0 auto;
   padding: 16px;
 }

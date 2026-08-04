@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, ref } from 'vue'
 import { init, graphic, use, type ECharts } from 'echarts/core'
 import { LineChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
@@ -40,36 +40,60 @@ const stats = computed(() => {
 // C11 · 图表主题美化
 function renderChart(points: TrendPoint[]): void {
   if (!chartRef.value) return
+  // 若实例绑定的 DOM 已变化（如容器被重建），销毁并重新初始化，避免空白
+  if (chart && chart.getDom() !== chartRef.value) {
+    chart.dispose()
+    chart = null
+  }
   chart ??= init(chartRef.value)
 
   chart.setOption({
     tooltip: {
       trigger: 'axis',
+      backgroundColor: 'rgba(255,255,255,0.96)',
+      borderColor: '#d6efe2',
+      borderWidth: 1,
+      padding: [10, 14],
+      textStyle: { color: '#303133', fontSize: 13 },
+      axisPointer: { type: 'line', lineStyle: { color: '#99d8b6', type: 'dashed' } },
       formatter: (params: unknown) => {
         const list = params as Array<{ marker: string; seriesName: string; value: number; axisValue: string }>
         const head = list[0] ? list[0].axisValue : ''
-        return `<b>${head}</b><br/>` + list.map((x) => `${x.marker}${x.seriesName}：<b>${x.value}</b>`).join('<br/>')
+        const rows = list
+          .map(
+            (x) =>
+              `<div style="display:flex;align-items:center;gap:10px;line-height:1.9">${x.marker}` +
+              `<span style="flex:1;color:#606266">${x.seriesName}</span><b style="color:#303133">${x.value}</b></div>`,
+          )
+          .join('')
+        return `<div style="font-weight:600;margin-bottom:4px">${head}</div>${rows}`
       },
     },
     legend: {
       data: ['热量(kcal)', '蛋白质(g)', '碳水(g)', '脂肪(g)'],
       bottom: 8,
       left: 'center',
-      itemGap: 24,
-      textStyle: { color: '#606266' },
+      itemGap: 22,
+      icon: 'circle',
+      itemWidth: 10,
+      itemHeight: 10,
+      textStyle: { color: '#606266', fontSize: 12 },
     },
     // 图例位于底部独立区域，grid 底部预留足够空间避免与图表重叠
-    grid: { left: 56, right: 24, top: 32, bottom: 64 },
+    grid: { left: 48, right: 20, top: 28, bottom: 60 },
     xAxis: {
       type: 'category',
       data: points.map((p) => p.date.slice(5)),
-      axisLabel: { color: '#909399' },
+      boundaryGap: false,
       axisLine: { lineStyle: { color: '#dcdfe6' } },
+      axisTick: { show: false },
+      axisLabel: { color: '#909399', fontSize: 12 },
     },
     yAxis: {
       type: 'value',
-      axisLabel: { color: '#909399' },
-      splitLine: { lineStyle: { color: '#f0f2f5' } },
+      axisLabel: { color: '#909399', fontSize: 12 },
+      splitLine: { lineStyle: { color: '#f0f2f5', type: 'dashed' } },
+      axisLine: { show: false },
     },
     series: [
       {
@@ -77,20 +101,66 @@ function renderChart(points: TrendPoint[]): void {
         type: 'line',
         smooth: true,
         symbol: 'circle',
-        symbolSize: 6,
+        symbolSize: 7,
+        showSymbol: points.length <= 14,
         data: points.map((p) => p.total_calories),
         lineStyle: { width: 3, color: '#32b16c' },
-        itemStyle: { color: '#32b16c' },
+        itemStyle: { color: '#32b16c', borderColor: '#fff', borderWidth: 2 },
         areaStyle: {
           color: new graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(50,177,108,0.35)' },
+            { offset: 0, color: 'rgba(50,177,108,0.32)' },
             { offset: 1, color: 'rgba(50,177,108,0.02)' },
           ]),
         },
       },
-      { name: '蛋白质(g)', type: 'line', smooth: true, symbol: 'circle', symbolSize: 6, data: points.map((p) => p.total_protein), lineStyle: { width: 2, color: '#288e56' }, itemStyle: { color: '#288e56' } },
-      { name: '碳水(g)', type: 'line', smooth: true, symbol: 'circle', symbolSize: 6, data: points.map((p) => p.total_carbs), lineStyle: { width: 2, color: '#e6a23c' }, itemStyle: { color: '#e6a23c' } },
-      { name: '脂肪(g)', type: 'line', smooth: true, symbol: 'circle', symbolSize: 6, data: points.map((p) => p.total_fat), lineStyle: { width: 2, color: '#f56c6c' }, itemStyle: { color: '#f56c6c' } },
+      {
+        name: '蛋白质(g)',
+        type: 'line',
+        smooth: true,
+        symbol: 'circle',
+        symbolSize: 6,
+        data: points.map((p) => p.total_protein),
+        lineStyle: { width: 2.5, color: '#288e56' },
+        itemStyle: { color: '#288e56' },
+        areaStyle: {
+          color: new graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: 'rgba(40,142,86,0.20)' },
+            { offset: 1, color: 'rgba(40,142,86,0.01)' },
+          ]),
+        },
+      },
+      {
+        name: '碳水(g)',
+        type: 'line',
+        smooth: true,
+        symbol: 'circle',
+        symbolSize: 6,
+        data: points.map((p) => p.total_carbs),
+        lineStyle: { width: 2.5, color: '#e6a23c' },
+        itemStyle: { color: '#e6a23c' },
+        areaStyle: {
+          color: new graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: 'rgba(230,162,60,0.18)' },
+            { offset: 1, color: 'rgba(230,162,60,0.01)' },
+          ]),
+        },
+      },
+      {
+        name: '脂肪(g)',
+        type: 'line',
+        smooth: true,
+        symbol: 'circle',
+        symbolSize: 6,
+        data: points.map((p) => p.total_fat),
+        lineStyle: { width: 2.5, color: '#f56c6c' },
+        itemStyle: { color: '#f56c6c' },
+        areaStyle: {
+          color: new graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: 'rgba(245,108,108,0.16)' },
+            { offset: 1, color: 'rgba(245,108,108,0.01)' },
+          ]),
+        },
+      },
     ],
   })
 }
@@ -121,6 +191,11 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)
   chart?.dispose()
+})
+
+// KeepAlive 激活（切回趋势页）时校正图表尺寸
+onActivated(() => {
+  chart?.resize()
 })
 </script>
 
@@ -161,9 +236,11 @@ onBeforeUnmount(() => {
         </div>
       </template>
 
-      <!-- D13 · 骨架屏加载态 -->
-      <el-skeleton v-if="loading" :rows="6" animated class="trend-skeleton" />
-      <div v-else class="trend-chart" ref="chartRef" />
+      <!-- 图表容器常驻：避免切换周期时销毁 DOM 导致 ECharts 实例失效空白 -->
+      <div class="trend-chart-wrap">
+        <div class="trend-chart" ref="chartRef" />
+        <el-skeleton v-if="loading" :rows="6" animated class="trend-skeleton" />
+      </div>
 
       <el-empty
         v-if="!loading && trend.length > 0 && trend.every((p) => p.dish_count === 0)"
@@ -176,6 +253,8 @@ onBeforeUnmount(() => {
 <style scoped>
 .trend-page {
   max-width: 860px;
+  width: 100%;
+  box-sizing: border-box;
   margin: 0 auto;
   padding: 16px;
 }
@@ -251,12 +330,22 @@ onBeforeUnmount(() => {
   line-height: 30px;
 }
 
-.trend-chart {
+.trend-chart-wrap {
+  position: relative;
   width: 100%;
   height: 360px;
 }
 
+.trend-chart {
+  width: 100%;
+  height: 100%;
+}
+
 .trend-skeleton {
+  position: absolute;
+  inset: 0;
   padding: 24px 12px;
+  background: #fff;
+  z-index: 1;
 }
 </style>

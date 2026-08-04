@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { FirstAidKit, Sugar, Wallet } from '@element-plus/icons-vue'
 import type { UserProfile } from '@/types/chat'
@@ -12,15 +12,6 @@ const flavor = ref(profileStore.flavor_preferences)
 const healthGoal = ref(profileStore.health_goals)
 
 const GOALS = ['高蛋白', '增肌', '控油', '控糖', '减脂']
-
-// C12 · 注入话术实时预览（与 ChatView 的 injectedPrompt 一致）
-const preview = computed(() => {
-  const parts: string[] = []
-  if (budget.value > 0) parts.push(`预算${budget.value}元`)
-  if (flavor.value.trim()) parts.push(`口味偏好${flavor.value.trim()}`)
-  if (healthGoal.value) parts.push(`目标${healthGoal.value}`)
-  return parts.length ? `（用户偏好：${parts.join('，')}）请问有什么推荐？` : '尚未设置偏好，将按默认推荐。'
-})
 
 function save(): void {
   const profile: UserProfile = {
@@ -79,10 +70,6 @@ defineExpose({ save })
       <el-button @click="reset">重置</el-button>
     </div>
 
-    <div class="pf-preview">
-      <div class="pf-preview-title">💬 注入话术预览</div>
-      <div class="pf-preview-text">{{ preview }}</div>
-    </div>
   </div>
 </template>
 
@@ -133,25 +120,5 @@ defineExpose({ save })
 .pf-actions {
   display: flex;
   gap: 10px;
-}
-
-.pf-preview {
-  border: 1px dashed var(--el-color-primary-light-7);
-  background: var(--el-color-primary-light-9);
-  border-radius: 12px;
-  padding: 12px 16px;
-}
-
-.pf-preview-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--el-color-primary);
-  margin-bottom: 6px;
-}
-
-.pf-preview-text {
-  font-size: 13px;
-  color: #606266;
-  line-height: 1.6;
 }
 </style>
