@@ -94,6 +94,11 @@ class DatabaseInterface(ABC):
         ...
 
     @abstractmethod
+    def get_records_in_range(self, start_date: str, end_date: str,
+                             meal_time: str = "") -> list[dict]:
+        ...
+
+    @abstractmethod
     def get_daily_nutrition(self, date: str) -> list[dict]:
         ...
 
@@ -410,6 +415,22 @@ class SQLiteDatabase(DatabaseInterface):
                    WHERE mr.date = ? AND mr.confirmed = 1
                    ORDER BY mr.meal_time""",
                 (date,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_records_in_range(self, start_date: str, end_date: str,
+                             meal_time: str = "") -> list[dict]:
+        """返回 [start_date, end_date] 内已确认的饮食记录，可按餐次过滤。"""
+        sql = ("""SELECT mr.*, d.name AS dish_name, d.calories, d.protein,
+                          d.carbs, d.fat, d.price, d.category
+                   FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
+                   WHERE mr.confirmed = 1 AND mr.date BETWEEN ? AND ?""")
+        params: list = [start_date, end_date]
+        if meal_time:
+            sql += " AND mr.meal_time = ?"
+            params.append(meal_time)
+        sql += " ORDER BY mr.date DESC, mr.meal_time, mr.id"
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
     def get_daily_nutrition(self, date: str) -> list[dict]:

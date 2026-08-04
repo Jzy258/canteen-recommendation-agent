@@ -96,6 +96,18 @@ def trend(days: int = 7, end_date: str = ""):
     return get_db().get_weekly_trend(end_date=end_date, days=days)
 
 
+@app.get("/records")
+def records(start_date: str = "", end_date: str = "", meal_time: str = ""):
+    """历史饮食记录：默认最近 30 天，可按餐次过滤（breakfast/lunch/dinner/other）。"""
+    from datetime import date, timedelta
+    from db import get_db
+    if not end_date:
+        end_date = date.today().isoformat()
+    if not start_date:
+        start_date = (date.fromisoformat(end_date) - timedelta(days=29)).isoformat()
+    return get_db().get_records_in_range(start_date, end_date, meal_time)
+
+
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
     if not req.message or not req.message.strip():
