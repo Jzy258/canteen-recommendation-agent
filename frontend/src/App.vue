@@ -44,10 +44,13 @@ import { ChatDotRound, KnifeFork, Notebook, TrendCharts, User } from '@element-p
     </header>
 
     <main class="app-main">
+      <!-- keep-alive：切换标签页时缓存页面组件，返回后保持原样（聊天记录等不丢失）。
+           注意：transition 与 keep-alive 组合在本项目存在缓存组件未隐藏的 bug，
+           故此处只使用 keep-alive（fade-slide 动画在页面内部元素上实现）。 -->
       <router-view v-slot="{ Component }">
-        <transition name="fade-slide" mode="out-in">
+        <keep-alive>
           <component :is="Component" />
-        </transition>
+        </keep-alive>
       </router-view>
     </main>
   </div>

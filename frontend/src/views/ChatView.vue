@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, ref } from 'vue'
+import { nextTick, onActivated, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ChatDotRound, Plus, User } from '@element-plus/icons-vue'
 import { chat, chatStream } from '@/api/chat'
@@ -186,6 +186,11 @@ function startNewSession(): void {
 function onEnter(): void {
   send()
 }
+
+// keep-alive 激活：从其他标签页返回时滚动到底部，保持聊天视图
+onActivated(() => {
+  scrollToBottom()
+})
 </script>
 
 <template>
