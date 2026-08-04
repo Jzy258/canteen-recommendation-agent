@@ -60,7 +60,9 @@ def optimize_meal(dishes: list[dict], budget: float, calorie_limit: float,
         return _empty_result("预算/热量约束下无任何可行菜品")
 
     # 二维 01 背包
-    max_price = int(budget)
+    # 价格按 0.5 元缩放为整数（price*2），避免 int() 截断丢失 0.5 元精度
+    PRICE_STEP = 2  # 1 元 = 2 个价格单位
+    max_price = int(round(budget * PRICE_STEP))
     max_cal = int(calorie_limit)
     NEG = -1e9
     # dp[p][c] = 最大蛋白质
@@ -70,7 +72,7 @@ def optimize_meal(dishes: list[dict], budget: float, calorie_limit: float,
     dp[0][0] = 0.0
 
     for idx, d in enumerate(candidates):
-        price = int(round(_as_float(d, "price")))
+        price = int(round(_as_float(d, "price") * PRICE_STEP))
         cal = int(round(_as_float(d, "calories")))
         prot = _as_float(d, "protein")
         for p in range(max_price, price - 1, -1):
@@ -99,7 +101,7 @@ def optimize_meal(dishes: list[dict], budget: float, calorie_limit: float,
         if idx < 0:
             break
         selected_idx.append(idx)
-        p -= int(round(_as_float(candidates[idx], "price")))
+        p -= int(round(_as_float(candidates[idx], "price") * PRICE_STEP))
         c -= int(round(_as_float(candidates[idx], "calories")))
 
     selected = [candidates[i] for i in reversed(selected_idx)]

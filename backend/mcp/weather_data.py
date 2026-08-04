@@ -21,7 +21,8 @@ from urllib.parse import quote
 
 from dotenv import load_dotenv
 
-load_dotenv()
+# 显式加载项目根目录 .env，避免 find_dotenv 因 backend/ 下存在 .env 而加载错位置
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 
 # 城市名 → 高德 adcode 兜底映射（优先用地理编码接口动态解析）
 CITY_ADCODE = {

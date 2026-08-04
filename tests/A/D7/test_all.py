@@ -110,6 +110,39 @@ try:
     check("get_dishes_by_weather_tag('') 返回空", db.get_dishes_by_weather_tag("") == [])
 
     print("\n" + "=" * 55)
+    print("5. P0 修复验证（价格精度 / 营养汇总协调）")
+    print("=" * 55)
+    # P0-2: 价格 0.5 元精度（插入 0.5 元高蛋白菜，预算 0.5 应选中而非被 int() 截断丢弃）
+    import sqlite3
+    conn = sqlite3.connect(tmp_db)
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute(
+        """INSERT INTO dish (name, calories, protein, carbs, fat, price, category, flavor_tags, source)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        ("测试半价菜", 80, 10, 8, 2, 0.5, "素菜", "清淡", "测试"))
+    conn.commit()
+    conn.close()
+    dishes_p = db.get_all_dishes()
+    r_half = optimize_meal(dishes_p, 0.5, 800)
+    names_half = [d["name"] for d in r_half["dishes"]]
+    check("0.5元价格不丢失精度", "测试半价菜" in names_half, f"got {names_half}")
+    check("0.5元预算下价格不超限", r_half["total_price"] <= 0.5 + 1e-6,
+          f"total={r_half['total_price']}")
+
+    # P0-3: 确认后保留 B 的 summarize_nutrition 键（days/week_key）
+    import json
+    db.upsert_user_profile(budget=20)
+    db.update_nutrition_summary(json.dumps(
+        {"days": 2, "week_key": "2026-08-07", "avg_calories": 500.0}, ensure_ascii=False))
+    rid = db.add_meal_record("2026-08-03", "lunch", 1, 1.0)
+    db.confirm_meal_record(rid)
+    prof = db.get_user_profile()
+    summ = json.loads(prof["nutrition_summary"])
+    check("确认后保留B的week_key", summ.get("week_key") == "2026-08-07", f"got {summ}")
+    check("确认后保留B的days", summ.get("days") == 2, f"got {summ}")
+    check("确认后A的record_count更新", summ.get("record_count") == 1, f"got {summ}")
+
+    print("\n" + "=" * 55)
     print(f"D7 边界验证: {passes} 通过, {fails} 失败")
     print("=" * 55)
     if fails == 0:
