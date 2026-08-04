@@ -4,15 +4,27 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[3] / "backend"))
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, AIMessageChunk
 from fastapi.testclient import TestClient
 
 
 class FakeAgent:
+    """模拟真实 Agent 的 astream_events：按块产出 on_chat_model_stream 事件。"""
+
     def invoke(self, state):
         n = len(state["messages"])
         text = f"回复内容-消息数{n}：" + "流式测试内容" * 3
         return {"messages": [AIMessage(content=text)]}
+
+    async def astream_events(self, state, version="v2"):
+        n = len(state["messages"])
+        text = f"回复内容-消息数{n}：" + "流式测试内容" * 3
+        for i in range(0, len(text), 3):
+            chunk = AIMessageChunk(content=text[i:i + 3])
+            yield {
+                "event": "on_chat_model_stream",
+                "data": {"chunk": chunk},
+            }
 
 
 def build_client():
