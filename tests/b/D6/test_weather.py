@@ -21,6 +21,11 @@ def test_city_to_adcode():
 
 def test_adcode_cache():
     # 动态解析后写入内存缓存，再次调用命中缓存不重复请求
+    # 依赖真实地理编码 API：无 WEATHER_API_KEY 时跳过（uv 无 key 环境）
+    import os
+    if not os.getenv("WEATHER_API_KEY"):
+        print("  adcode cache: skipped (no WEATHER_API_KEY)")
+        return
     before = set(_adcode_cache.keys())
     ad = city_to_adcode("青岛")
     assert ad == "370200"

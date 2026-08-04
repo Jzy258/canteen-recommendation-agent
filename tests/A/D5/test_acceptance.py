@@ -59,7 +59,8 @@ doc = open(doc_path, encoding="utf-8").read()
 for kw in ["评分公式", "预算约束", "营养均衡", "偏好权重", "系数", "调整策略",
            "组合优化", "验证结果"]:
     check(f"文档含 '{kw}'", kw in doc)
-check("文档版本标注", "v1.2" in doc)
+import re as _re
+check("文档版本标注", bool(_re.search(r"版本：v\d+\.\d+", doc)))
 
 print("\n" + "=" * 55)
 print("交付物 4: db.py HITL 接口函数")

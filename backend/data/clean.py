@@ -17,9 +17,7 @@
 import argparse
 import csv
 import os
-import re
 import sys
-from collections import defaultdict
 
 
 EXPECTED_FIELDS = ["name", "calories", "protein", "carbs", "fat", "price",
@@ -56,7 +54,16 @@ def normalize_name(name: str) -> str:
 
 
 def is_near_duplicate(name_a: str, name_b: str) -> bool:
-    return False
+    """近似重复检测：同一道菜的不同写法（如"红烧肉" vs "红烧肉片"）。
+    规则：一个名称是另一个的前缀（长度差 ≥1，如 A+B 型），视为同菜；
+    "酸辣土豆丝" vs "醋溜土豆丝"（前缀不同、长度相同）不是重复。
+    完全相同由上层完全去重处理。"""
+    a, b = normalize_name(name_a), normalize_name(name_b)
+    if a == b:
+        return True
+    short, long = (a, b) if len(a) <= len(b) else (b, a)
+    # 前缀子串且长度差 ≥1（长名是短名的扩展，如"红烧肉"+"片"）
+    return long.startswith(short) and len(long) > len(short)
 
 
 def clean(rows: list[dict], check_only: bool = False) -> tuple[list[dict], list[str]]:

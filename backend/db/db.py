@@ -325,8 +325,10 @@ class SQLiteDatabase(DatabaseInterface):
         return dict(row) if row else None
 
     def _refresh_profile_summary(self):
-        """确认记录后，重算已确认记录的历史营养汇总并写入 user_profile。
-        汇总内容：总摄入、日均营养、按餐次平均、菜品多样性、近7天趋势。"""
+        """确认记录后，重算已确认记录的营养汇总并写入 user_profile。
+        汇总内容：总摄入、日均营养、按餐次平均、菜品多样性、近7天趋势。
+        与 B 的 store.summarize_nutrition 协调：仅更新本模块的统计键，
+        保留既有 summary 中的其他键（如 B 写入的 days/week_key），避免互相覆盖。"""
         with self._connect() as conn:
             row = conn.execute(
                 """SELECT
@@ -339,6 +341,17 @@ class SQLiteDatabase(DatabaseInterface):
                        ROUND(SUM(d.fat * mr.portion), 1) AS total_fat
                    FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
                    WHERE mr.confirmed = 1""").fetchone()
+
+        import json
+        # 读取既有 summary，保留 A 不管理的键（协调 B 的 summarize_nutrition）
+        existing = {}
+        prof = self.get_user_profile()
+        if prof and prof.get("nutrition_summary"):
+            try:
+                existing = json.loads(prof["nutrition_summary"])
+            except Exception:
+                existing = {}
+        merged = dict(existing)  # 保留 B 的键（days/week_key 等）
 
         if not row or row["record_count"] == 0:
             summary = {}
@@ -359,11 +372,11 @@ class SQLiteDatabase(DatabaseInterface):
             }
             summary["meal_averages"] = self._meal_averages()
             summary["recent_trend"] = self._recent_trend()
+        merged.update(summary)  # A 的键覆盖，B 的键保留
 
-        import json
         if self.get_user_profile() is None:
             self.upsert_user_profile()
-        self.update_nutrition_summary(json.dumps(summary, ensure_ascii=False))
+        self.update_nutrition_summary(json.dumps(merged, ensure_ascii=False))
 
     def _meal_averages(self) -> dict:
         """按餐次统计平均摄入。"""

@@ -1,4 +1,5 @@
 {
+<<<<<<< Updated upstream
   "requests": 9,
   "errors": 0,
   "total_time_ms": 25.3,
@@ -7,4 +8,17 @@
     "/trend": 9
   },
   "updated_at": "2026-08-04T10:11:16"
+=======
+  "requests": 26,
+  "errors": 0,
+  "total_time_ms": 79936.33,
+  "total_tokens": 451,
+  "by_path": {
+    "/trend": 18,
+    "/chat/stream": 2,
+    "/health": 2,
+    "/chat": 4
+  },
+  "updated_at": "2026-08-04T11:07:32"
+>>>>>>> Stashed changes
 }
