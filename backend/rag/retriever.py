@@ -17,6 +17,9 @@ import zlib
 from langchain_core.tools import tool
 from langchain_core.embeddings import Embeddings
 from db import get_db
+from middleware.logger_config import get_logger
+
+logger = get_logger("canteen.rag")
 
 # =============================================================================
 # 切词（自研中文轻量切词）
@@ -182,6 +185,7 @@ def get_retriever() -> ChromaDishRetriever:
     key = _content_key(dishes)
     if key not in _retriever_cache:
         persist = os.getenv("CHROMA_DB_PATH", "backend/data/chroma_db")
+        logger.info("RAG 索引重建 | dishes=%s key=%s", len(dishes), key)
         _retriever_cache[key] = ChromaDishRetriever(dishes, persist_dir=persist)
     return _retriever_cache[key]
 

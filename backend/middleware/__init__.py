@@ -5,6 +5,8 @@ from .metrics import (
 )
 from .token_counter import count_tokens, count_messages
 from .reply_formatter import clean_markdown
+from .logger_config import setup_logging, get_logger
 
 __all__ = ["RequestMetricsMiddleware", "add_tokens", "get_metrics",
-           "count_tokens", "count_messages", "clean_markdown"]
+           "count_tokens", "count_messages", "clean_markdown",
+           "setup_logging", "get_logger"]
