@@ -96,6 +96,16 @@ def trend(days: int = 7, end_date: str = ""):
     return get_db().get_weekly_trend(end_date=end_date, days=days)
 
 
+@app.get("/location")
+def location():
+    """通过 IP 定位当前所在城市（供前端定位；本地/内网 IP 可能定位失败）。"""
+    try:
+        from mcp.weather_data import auto_locate_city
+        return {"city": auto_locate_city() or ""}
+    except Exception:
+        return {"city": ""}
+
+
 @app.get("/records")
 def records(start_date: str = "", end_date: str = "", meal_time: str = ""):
     """历史饮食记录：默认最近 30 天，可按餐次过滤（breakfast/lunch/dinner/other）。"""

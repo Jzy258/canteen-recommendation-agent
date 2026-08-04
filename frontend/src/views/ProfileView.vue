@@ -9,7 +9,7 @@ import ProfileForm from '@/components/ProfileForm.vue'
       <template #header>
         <span class="profile-title">
           <el-icon><User /></el-icon>
-          我的偏好
+          偏好与设置
         </span>
       </template>
       <ProfileForm />

@@ -263,3 +263,4 @@ backend/data/adcode_cache.json
 backend/logs/
 
 .idea
+backend/data/loc_cache.json
