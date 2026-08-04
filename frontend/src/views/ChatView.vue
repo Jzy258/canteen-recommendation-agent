@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, ref } from 'vue'
+import { nextTick, onActivated, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ChatDotRound, Plus, User } from '@element-plus/icons-vue'
 import { chat, chatStream } from '@/api/chat'
@@ -39,6 +39,11 @@ function scrollToBottom(): void {
     }
   })
 }
+
+// KeepAlive 激活（切回聊天页）时滚动到底部，确保新内容可见
+onActivated(() => {
+  scrollToBottom()
+})
 
 function currentAssistant(): ChatMessage {
   let last = messages.value[messages.value.length - 1]
