@@ -3,9 +3,9 @@
 优先用 tiktoken（cl100k_base，OpenAI 通用 BPE），失败回退字符估算。
 统一入口 count_tokens(text) / count_messages(messages)。
 """
-import logging
+from middleware.logger_config import get_logger
 
-logger = logging.getLogger("canteen.tokens")
+logger = get_logger("canteen.tokens")
 
 _encoder = None
 _use_fallback = False

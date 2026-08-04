@@ -254,4 +254,7 @@ backend/data/metrics.json
 # adcode cache
 backend/data/adcode_cache.json
 
+# logs
+backend/logs/
+
 .idea

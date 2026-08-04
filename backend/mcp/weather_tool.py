@@ -7,9 +7,12 @@
 import json
 
 from langchain_core.tools import tool
+from middleware.logger_config import get_logger
 
 # 复用天气数据源逻辑（与 MCP server 同源）
 from mcp.weather_data import get_weather, weather_to_dish_type
+
+logger = get_logger("canteen.weather")
 
 
 @tool
@@ -21,6 +24,7 @@ def get_weather_recommendation(city: str = "北京") -> str:
     try:
         data = get_weather(city)
     except Exception as e:
+        logger.error("天气获取失败 | city=%s | err=%s", city, e)
         return f"天气获取失败: {e}"
 
     wtype = data["weather_type"]
