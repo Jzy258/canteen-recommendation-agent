@@ -12,11 +12,14 @@ import type { TrendPoint } from '@/types/chat'
 // P0 · ECharts 按需引入：仅注册用到的图表/组件，显著降低打包体积
 use([LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
 
-const chartRef = ref<HTMLDivElement>()
+// 两个独立图表：热量 / 蛋白质·碳水·脂肪
+const calChartRef = ref<HTMLDivElement>()
+const macroChartRef = ref<HTMLDivElement>()
 const days = ref(7)
 const loading = ref(false)
 const trend = ref<TrendPoint[]>([])
-let chart: ECharts | null = null
+let calChart: ECharts | null = null
+let macroChart: ECharts | null = null
 
 // C10 · 汇总统计
 const stats = computed(() => {
@@ -37,44 +40,55 @@ const stats = computed(() => {
   }
 })
 
-// C11 · 图表主题美化
-function renderChart(points: TrendPoint[]): void {
-  if (!chartRef.value) return
-  // 若实例绑定的 DOM 已变化（如容器被重建），销毁并重新初始化，避免空白
-  if (chart && chart.getDom() !== chartRef.value) {
-    chart.dispose()
-    chart = null
+// 图表实例管理：容器常驻，若 DOM 变化则销毁重建，避免空白
+function ensureChart(
+  refEl: HTMLDivElement | undefined,
+  holder: { chart: ECharts | null },
+): ECharts | null {
+  if (!refEl) return holder.chart
+  if (holder.chart && holder.chart.getDom() !== refEl) {
+    holder.chart.dispose()
+    holder.chart = null
   }
-  chart ??= init(chartRef.value)
+  holder.chart ??= init(refEl)
+  return holder.chart
+}
 
-  chart.setOption({
-    tooltip: {
-      trigger: 'axis',
-      backgroundColor: 'rgba(255,255,255,0.96)',
-      borderColor: '#d6efe2',
-      borderWidth: 1,
-      padding: [10, 14],
-      textStyle: { color: '#303133', fontSize: 13 },
-      axisPointer: { type: 'line', lineStyle: { color: '#99d8b6', type: 'dashed' } },
-      formatter: (params: unknown) => {
-        const list = params as Array<{ marker: string; seriesName: string; value: number; axisValue: string }>
-        const head = list[0] ? list[0].axisValue : ''
-        const rows = list
-          .map(
-            (x) =>
-              `<div style="display:flex;align-items:center;gap:10px;line-height:1.9">${x.marker}` +
-              `<span style="flex:1;color:#606266">${x.seriesName}</span><b style="color:#303133">${x.value}</b></div>`,
-          )
-          .join('')
-        return `<div style="font-weight:600;margin-bottom:4px">${head}</div>${rows}`
-      },
+// 公共 tooltip
+function makeTooltip() {
+  return {
+    trigger: 'axis' as const,
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    borderColor: '#d6efe2',
+    borderWidth: 1,
+    padding: [10, 14],
+    textStyle: { color: '#303133', fontSize: 13 },
+    axisPointer: { type: 'line' as const, lineStyle: { color: '#99d8b6', type: 'dashed' as const } },
+    formatter: (params: unknown) => {
+      const list = params as Array<{ marker: string; seriesName: string; value: number; axisValue: string }>
+      const head = list[0] ? list[0].axisValue : ''
+      const rows = list
+        .map(
+          (x) =>
+            `<div style="display:flex;align-items:center;gap:10px;line-height:1.9">${x.marker}` +
+            `<span style="flex:1;color:#606266">${x.seriesName}</span><b style="color:#303133">${x.value}</b></div>`,
+        )
+        .join('')
+      return `<div style="font-weight:600;margin-bottom:4px">${head}</div>${rows}`
     },
+  }
+}
+
+// 公共坐标系配置
+function makeBase(points: TrendPoint[], legendData: string[]) {
+  return {
+    tooltip: makeTooltip(),
     legend: {
-      data: ['热量(kcal)', '蛋白质(g)', '碳水(g)', '脂肪(g)'],
+      data: legendData,
       bottom: 8,
-      left: 'center',
+      left: 'center' as const,
       itemGap: 22,
-      icon: 'circle',
+      icon: 'circle' as const,
       itemWidth: 10,
       itemHeight: 10,
       textStyle: { color: '#606266', fontSize: 12 },
@@ -82,7 +96,7 @@ function renderChart(points: TrendPoint[]): void {
     // 图例位于底部独立区域，grid 底部预留足够空间避免与图表重叠
     grid: { left: 48, right: 20, top: 28, bottom: 60 },
     xAxis: {
-      type: 'category',
+      type: 'category' as const,
       data: points.map((p) => p.date.slice(5)),
       boundaryGap: false,
       axisLine: { lineStyle: { color: '#dcdfe6' } },
@@ -90,11 +104,34 @@ function renderChart(points: TrendPoint[]): void {
       axisLabel: { color: '#909399', fontSize: 12 },
     },
     yAxis: {
-      type: 'value',
+      type: 'value' as const,
       axisLabel: { color: '#909399', fontSize: 12 },
-      splitLine: { lineStyle: { color: '#f0f2f5', type: 'dashed' } },
+      splitLine: { lineStyle: { color: '#f0f2f5', type: 'dashed' as const } },
       axisLine: { show: false },
     },
+  }
+}
+
+function hexToRgb(hex: string): string {
+  const n = parseInt(hex.replace('#', ''), 16)
+  return `${(n >> 16) & 255},${(n >> 8) & 255},${n & 255}`
+}
+
+function areaGradient(color: string, alpha: number) {
+  return new graphic.LinearGradient(0, 0, 0, 1, [
+    { offset: 0, color: `rgba(${hexToRgb(color)},${alpha})` },
+    { offset: 1, color: `rgba(${hexToRgb(color)},0.02)` },
+  ])
+}
+
+// C11 · 图表一：仅热量趋势
+function renderCalChart(points: TrendPoint[]): void {
+  const chart = ensureChart(calChartRef.value, { chart: calChart })
+  if (!chart) return
+  calChart = chart
+  const calColor = '#32b16c'
+  chart.setOption({
+    ...makeBase(points, ['热量(kcal)']),
     series: [
       {
         name: '热量(kcal)',
@@ -104,64 +141,37 @@ function renderChart(points: TrendPoint[]): void {
         symbolSize: 7,
         showSymbol: points.length <= 14,
         data: points.map((p) => p.total_calories),
-        lineStyle: { width: 3, color: '#32b16c' },
-        itemStyle: { color: '#32b16c', borderColor: '#fff', borderWidth: 2 },
-        areaStyle: {
-          color: new graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(50,177,108,0.32)' },
-            { offset: 1, color: 'rgba(50,177,108,0.02)' },
-          ]),
-        },
-      },
-      {
-        name: '蛋白质(g)',
-        type: 'line',
-        smooth: true,
-        symbol: 'circle',
-        symbolSize: 6,
-        data: points.map((p) => p.total_protein),
-        lineStyle: { width: 2.5, color: '#288e56' },
-        itemStyle: { color: '#288e56' },
-        areaStyle: {
-          color: new graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(40,142,86,0.20)' },
-            { offset: 1, color: 'rgba(40,142,86,0.01)' },
-          ]),
-        },
-      },
-      {
-        name: '碳水(g)',
-        type: 'line',
-        smooth: true,
-        symbol: 'circle',
-        symbolSize: 6,
-        data: points.map((p) => p.total_carbs),
-        lineStyle: { width: 2.5, color: '#e6a23c' },
-        itemStyle: { color: '#e6a23c' },
-        areaStyle: {
-          color: new graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(230,162,60,0.18)' },
-            { offset: 1, color: 'rgba(230,162,60,0.01)' },
-          ]),
-        },
-      },
-      {
-        name: '脂肪(g)',
-        type: 'line',
-        smooth: true,
-        symbol: 'circle',
-        symbolSize: 6,
-        data: points.map((p) => p.total_fat),
-        lineStyle: { width: 2.5, color: '#f56c6c' },
-        itemStyle: { color: '#f56c6c' },
-        areaStyle: {
-          color: new graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(245,108,108,0.16)' },
-            { offset: 1, color: 'rgba(245,108,108,0.01)' },
-          ]),
-        },
+        lineStyle: { width: 3, color: calColor },
+        itemStyle: { color: calColor, borderColor: '#fff', borderWidth: 2 },
+        areaStyle: { color: areaGradient(calColor, 0.32) },
       },
     ],
+  })
+}
+
+// C11 · 图表二：蛋白质 / 碳水 / 脂肪
+function renderMacroChart(points: TrendPoint[]): void {
+  const chart = ensureChart(macroChartRef.value, { chart: macroChart })
+  if (!chart) return
+  macroChart = chart
+  const series = [
+    { name: '蛋白质(g)', key: 'total_protein' as const, color: '#288e56', alpha: 0.2 },
+    { name: '碳水(g)', key: 'total_carbs' as const, color: '#e6a23c', alpha: 0.18 },
+    { name: '脂肪(g)', key: 'total_fat' as const, color: '#f56c6c', alpha: 0.16 },
+  ]
+  chart.setOption({
+    ...makeBase(points, series.map((s) => s.name)),
+    series: series.map((s) => ({
+      name: s.name,
+      type: 'line',
+      smooth: true,
+      symbol: 'circle',
+      symbolSize: 6,
+      data: points.map((p) => p[s.key]),
+      lineStyle: { width: 2.5, color: s.color },
+      itemStyle: { color: s.color },
+      areaStyle: { color: areaGradient(s.color, s.alpha) },
+    })),
   })
 }
 
@@ -172,15 +182,17 @@ async function load(): Promise<void> {
   } catch {
     ElMessage.error('趋势数据加载失败，请确认后端已启动')
   } finally {
-    // 先结束加载态，等 .trend-chart 渲染后再初始化图表
+    // 先结束加载态，等图表容器渲染后再初始化两个图表
     loading.value = false
     await nextTick()
-    renderChart(trend.value)
+    renderCalChart(trend.value)
+    renderMacroChart(trend.value)
   }
 }
 
 function onResize(): void {
-  chart?.resize()
+  calChart?.resize()
+  macroChart?.resize()
 }
 
 onMounted(() => {
@@ -190,15 +202,16 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)
-  chart?.dispose()
+  calChart?.dispose()
+  macroChart?.dispose()
 })
 
-// KeepAlive 激活（切回趋势页）时校正图表尺寸
+// KeepAlive 激活（切回趋势页）时校正两个图表尺寸
 onActivated(() => {
-  chart?.resize()
+  calChart?.resize()
+  macroChart?.resize()
 })
 </script>
-
 <template>
   <div class="trend-page">
     <!-- C10 · 汇总统计卡 -->
@@ -236,10 +249,22 @@ onActivated(() => {
         </div>
       </template>
 
-      <!-- 图表容器常驻：避免切换周期时销毁 DOM 导致 ECharts 实例失效空白 -->
-      <div class="trend-chart-wrap">
-        <div class="trend-chart" ref="chartRef" />
-        <el-skeleton v-if="loading" :rows="6" animated class="trend-skeleton" />
+      <!-- 图表一：仅热量趋势 -->
+      <div class="trend-chart-block">
+        <div class="block-title">🔥 热量趋势</div>
+        <div class="trend-chart-wrap">
+          <div class="trend-chart" ref="calChartRef" />
+          <el-skeleton v-if="loading" :rows="5" animated class="trend-skeleton" />
+        </div>
+      </div>
+
+      <!-- 图表二：蛋白质 / 碳水 / 脂肪 -->
+      <div class="trend-chart-block">
+        <div class="block-title">🍗 蛋白质 / 碳水 / 脂肪</div>
+        <div class="trend-chart-wrap">
+          <div class="trend-chart" ref="macroChartRef" />
+          <el-skeleton v-if="loading" :rows="5" animated class="trend-skeleton" />
+        </div>
       </div>
 
       <el-empty
@@ -249,7 +274,6 @@ onActivated(() => {
     </el-card>
   </div>
 </template>
-
 <style scoped>
 .trend-page {
   max-width: 860px;
@@ -330,10 +354,27 @@ onActivated(() => {
   line-height: 30px;
 }
 
+/* 图表块：两块分隔 */
+.trend-chart-block {
+  margin-bottom: 18px;
+}
+
+.trend-chart-block + .trend-chart-block {
+  border-top: 1px dashed var(--el-color-primary-light-8);
+  padding-top: 16px;
+}
+
+.block-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 10px;
+}
+
 .trend-chart-wrap {
   position: relative;
   width: 100%;
-  height: 360px;
+  height: 320px;
 }
 
 .trend-chart {
