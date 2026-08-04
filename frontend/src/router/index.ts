@@ -7,6 +7,7 @@ const router = createRouter({
   routes: [
     { path: '/', name: 'chat', component: () => import('@/views/ChatView.vue') },
     { path: '/trend', name: 'trend', component: () => import('@/views/TrendView.vue') },
+    { path: '/records', name: 'records', component: () => import('@/views/RecordsView.vue') },
     { path: '/profile', name: 'profile', component: () => import('@/views/ProfileView.vue') },
   ],
 })

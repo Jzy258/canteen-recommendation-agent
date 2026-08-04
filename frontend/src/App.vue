@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { RouterView } from 'vue-router'
-import { ChatDotRound, KnifeFork, TrendCharts, User } from '@element-plus/icons-vue'
+import { ChatDotRound, KnifeFork, Notebook, TrendCharts, User } from '@element-plus/icons-vue'
 </script>
 
 <template>
@@ -28,6 +28,10 @@ import { ChatDotRound, KnifeFork, TrendCharts, User } from '@element-plus/icons-
           <el-menu-item index="/trend">
             <span class="nav-logo"><el-icon><TrendCharts /></el-icon></span>
             <span class="nav-label">营养趋势</span>
+          </el-menu-item>
+          <el-menu-item index="/records">
+            <span class="nav-logo"><el-icon><Notebook /></el-icon></span>
+            <span class="nav-label">饮食记录</span>
           </el-menu-item>
           <el-menu-item index="/profile">
             <span class="nav-logo"><el-icon><User /></el-icon></span>

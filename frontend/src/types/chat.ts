@@ -47,6 +47,24 @@ export interface ParsedDish {
   fat?: number
 }
 
+/** 历史饮食记录（后端 GET /records 返回） */
+export interface MealRecordItem {
+  id: number
+  date: string
+  meal_time: string
+  dish_id: number
+  portion: number
+  confirmed: number
+  created_at: string
+  dish_name: string
+  calories: number
+  protein: number
+  carbs: number
+  fat: number
+  price: number
+  category: string
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
