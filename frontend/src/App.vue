@@ -1,11 +1,37 @@
 <script setup lang="ts">
-import { RouterView } from 'vue-router'
-import { ChatDotRound, KnifeFork, Notebook, TrendCharts, User } from '@element-plus/icons-vue'
+import { computed, onBeforeMount } from 'vue'
+import { RouterView, useRoute } from 'vue-router'
+import { ChatDotRound, KnifeFork, Notebook, SwitchButton, TrendCharts, User } from '@element-plus/icons-vue'
+import { useAuthStore } from '@/stores/auth'
+import { isTokenExpired } from '@/utils/jwt'
+
+const authStore = useAuthStore()
+const route = useRoute()
+
+// 渲染前清理过期登录态，保证导航栏状态与路由守卫一致
+onBeforeMount(() => {
+  if (authStore.token && isTokenExpired(authStore.token)) {
+    authStore.logout()
+  }
+})
+
+// 登录/注册页不显示导航栏用户区
+const isAuthPage = computed(() => route.name === 'login')
+
+function onLogout(): void {
+  authStore.logout()
+  // 回到登录页
+  window.location.href = `${import.meta.env.BASE_URL}login`
+}
+
+function goLogin(): void {
+  window.location.href = `${import.meta.env.BASE_URL}login`
+}
 </script>
 
 <template>
   <div class="app-shell">
-    <header class="app-header">
+    <header v-if="!isAuthPage" class="app-header">
       <div class="app-brand">
         <span class="brand-logo">
           <el-icon :size="18"><KnifeFork /></el-icon>
@@ -41,13 +67,44 @@ import { ChatDotRound, KnifeFork, Notebook, TrendCharts, User } from '@element-p
       </nav>
 
       <div class="app-nav-spacer" />
+
+      <div v-if="!isAuthPage" class="app-user">
+        <template v-if="authStore.isLoggedIn">
+          <el-dropdown>
+            <span class="user-trigger">
+              <el-icon :size="16"><User /></el-icon>
+              <span class="user-name">{{ authStore.displayName }}</span>
+            </span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item v-if="authStore.isAdmin" disabled>
+                  管理员
+                </el-dropdown-item>
+                <el-dropdown-item :divided="authStore.isAdmin" @click="onLogout">
+                  <el-icon style="margin-right: 4px"><SwitchButton /></el-icon>
+                  退出登录
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </template>
+        <template v-else>
+          <el-button class="login-btn" @click="goLogin">
+            <el-icon :size="15" style="margin-right: 4px"><User /></el-icon>
+            登录 / 注册
+          </el-button>
+        </template>
+      </div>
     </header>
 
     <main class="app-main">
+      <!-- keep-alive：切换标签页时缓存页面组件，返回后保持原样（聊天记录等不丢失）。
+           注意：transition 与 keep-alive 组合在本项目存在缓存组件未隐藏的 bug，
+           故此处只使用 keep-alive（fade-slide 动画在页面内部元素上实现）。 -->
       <router-view v-slot="{ Component }">
-        <transition name="fade-slide" mode="out-in">
+        <keep-alive>
           <component :is="Component" />
-        </transition>
+        </keep-alive>
       </router-view>
     </main>
   </div>
@@ -157,6 +214,58 @@ import { ChatDotRound, KnifeFork, Notebook, TrendCharts, User } from '@element-p
 /* 右侧占位，保持品牌-菜单视觉平衡 */
 .app-nav-spacer {
   min-width: 190px;
+}
+
+/* 用户区（登录状态） */
+.app-user {
+  display: flex;
+  align-items: center;
+  margin-left: 12px;
+  flex-shrink: 0;
+}
+
+.user-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: #606266;
+  font-size: 13px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+
+.user-trigger:hover {
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+}
+
+.user-name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 醒目登录按钮 */
+.login-btn {
+  background: linear-gradient(135deg, #32b16c, #288e56);
+  border: none;
+  color: #fff;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 8px 18px;
+  box-shadow: 0 3px 10px rgba(50, 177, 108, 0.35);
+  transition: all 0.2s;
+}
+
+.login-btn:hover,
+.login-btn:focus {
+  background: linear-gradient(135deg, #3dc47a, #2c9a5c);
+  color: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 5px 16px rgba(50, 177, 108, 0.45);
 }
 
 /* 主体 */

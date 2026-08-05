@@ -12,7 +12,7 @@
 """
 from pathlib import Path
 
-__version__ = "0.6.0"
+__version__ = "1.1.0"
 
 APP_NAME = "Canteen Recommendation Agent"
 APP_TITLE = "食堂菜品推荐与营养分析 Agent"

@@ -265,6 +265,12 @@ onMounted(load)
   white-space: nowrap;
 }
 
+/* 午餐：红色，与早餐（绿）、晚餐（橙）明显区分 */
+.ri-meal.lunch {
+  background: #fdecec;
+  color: #f56c6c;
+}
+
 .ri-meal.dinner {
   background: #fdf3e7;
   color: #e6a23c;
