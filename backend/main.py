@@ -21,6 +21,7 @@ from middleware import (RequestMetricsMiddleware, add_tokens, get_metrics,
                         StreamMarkdownCleaner, setup_logging, get_logger)
 from version import APP_NAME, VERSION
 from auth import auth_router, get_optional_user
+from auth.admin import router as admin_router
 
 # 统一日志系统（backend/logs，按天+大小滚动）
 setup_logging()
@@ -42,6 +43,9 @@ app.add_middleware(RequestMetricsMiddleware)
 
 # 用户系统：认证接口（/auth/*）
 app.include_router(auth_router)
+
+# 管理员接口（/admin/*，require_admin 鉴权）
+app.include_router(admin_router)
 
 # 挂载本地 swagger-ui 静态资源
 app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")

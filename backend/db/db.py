@@ -326,6 +326,104 @@ class SQLiteDatabase(DatabaseInterface):
             conn.executemany(sql, dishes)
             return conn.total_changes
 
+    # ---- admin: dish CRUD ----
+
+    def add_dish(self, dish: dict) -> int:
+        """新增菜品。返回 id；重名抛 sqlite3.IntegrityError。"""
+        sql = """INSERT INTO dish
+                 (name, calories, protein, carbs, fat, price, category, flavor_tags, source)
+                 VALUES (:name, :calories, :protein, :carbs, :fat, :price, :category, :flavor_tags, :source)"""
+        with self._connect() as conn:
+            cur = conn.execute(sql, {
+                "name": dish["name"],
+                "calories": dish.get("calories", 0),
+                "protein": dish.get("protein", 0),
+                "carbs": dish.get("carbs", 0),
+                "fat": dish.get("fat", 0),
+                "price": dish.get("price", 0),
+                "category": dish.get("category", ""),
+                "flavor_tags": dish.get("flavor_tags", ""),
+                "source": dish.get("source", ""),
+            })
+            return cur.lastrowid
+
+    def update_dish(self, dish_id: int, dish: dict) -> bool:
+        """更新菜品（仅更新传入的非空字段；name 冲突抛 IntegrityError）。"""
+        fields = {k: dish[k] for k in (
+            "name", "calories", "protein", "carbs", "fat", "price",
+            "category", "flavor_tags", "source") if k in dish and dish[k] not in (None, "")}
+        if not fields:
+            return False
+        sets = ", ".join(f"{k} = ?" for k in fields)
+        with self._connect() as conn:
+            cur = conn.execute(f"UPDATE dish SET {sets} WHERE id = ?",
+                               (*fields.values(), dish_id))
+            return cur.rowcount > 0
+
+    def delete_dish(self, dish_id: int) -> bool:
+        """删除菜品（menu_item 级联删除；若有摄入记录则保留 dish 但标记禁用由上层处理）。"""
+        with self._connect() as conn:
+            cur = conn.execute("DELETE FROM dish WHERE id = ?", (dish_id,))
+            return cur.rowcount > 0
+
+    # ---- admin: menu CRUD ----
+
+    def add_menu_item(self, date: str, meal_time: str, dish_ids: list[int]) -> dict:
+        """为指定日期餐次设置菜单菜品（覆盖式：先删后插）。返回 {menu_id, added}。"""
+        with self._connect() as conn:
+            # upsert menu 行
+            row = conn.execute(
+                "SELECT id FROM menu WHERE date = ? AND meal_time = ?",
+                (date, meal_time)).fetchone()
+            if row:
+                menu_id = row["id"]
+            else:
+                cur = conn.execute(
+                    "INSERT INTO menu (date, meal_time) VALUES (?, ?)",
+                    (date, meal_time))
+                menu_id = cur.lastrowid
+            # 覆盖式重设
+            conn.execute("DELETE FROM menu_item WHERE menu_id = ?", (menu_id,))
+            added = 0
+            for did in dish_ids:
+                try:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO menu_item (menu_id, dish_id) VALUES (?, ?)",
+                        (menu_id, did))
+                    added += 1
+                except sqlite3.Error:
+                    continue
+            return {"menu_id": menu_id, "added": added}
+
+    def delete_menu(self, date: str, meal_time: str) -> bool:
+        """删除指定日期餐次的菜单（menu_item 级联删除）。"""
+        with self._connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM menu WHERE date = ? AND meal_time = ?",
+                (date, meal_time))
+            return cur.rowcount > 0
+
+    # ---- admin: 全局统计 ----
+
+    def get_global_stats(self) -> dict:
+        """全局运营统计：用户数 / 菜品数 / 菜单数 / 摄入记录数 / 今日记录数。"""
+        with self._connect() as conn:
+            users = conn.execute("SELECT COUNT(*) c FROM app_user").fetchone()["c"]
+            dishes = conn.execute("SELECT COUNT(*) c FROM dish").fetchone()["c"]
+            menus = conn.execute("SELECT COUNT(*) c FROM menu").fetchone()["c"]
+            records = conn.execute("SELECT COUNT(*) c FROM meal_record").fetchone()["c"]
+            today = conn.execute(
+                "SELECT COUNT(*) c FROM meal_record WHERE date = date('now','localtime')"
+            ).fetchone()["c"]
+        return {
+            "user_count": users,
+            "dish_count": dishes,
+            "menu_count": menus,
+            "record_count": records,
+            "today_record_count": today,
+        }
+
+
     # ---- menu / menu_item ----
 
     def get_menu_by_date(self, date: str) -> list[dict]:
@@ -779,6 +877,33 @@ class SQLiteDatabase(DatabaseInterface):
                 "UPDATE app_user SET status = ? WHERE id = ?",
                 (status, user_id))
             return cur.rowcount > 0
+
+    def set_user_role(self, user_id: int, role: str) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE app_user SET role = ? WHERE id = ?",
+                (role, user_id))
+            return cur.rowcount > 0
+
+    def set_user_display_name(self, user_id: int, display_name: str) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE app_user SET display_name = ? WHERE id = ?",
+                (display_name, user_id))
+            return cur.rowcount > 0
+
+    def list_users(self, keyword: str = "", limit: int = 50, offset: int = 0) -> list[dict]:
+        """分页列出用户（管理员）。支持按 username/display_name 模糊搜索。"""
+        sql = "SELECT * FROM app_user"
+        params: list = []
+        if keyword:
+            sql += " WHERE username LIKE ? OR display_name LIKE ?"
+            params += [f"%{keyword}%", f"%{keyword}%"]
+        sql += " ORDER BY id DESC LIMIT ? OFFSET ?"
+        params += [limit, offset]
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
 
     # ---- user_profile ----
 
