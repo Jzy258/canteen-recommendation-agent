@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Aim, FirstAidKit, Location, NoSmoking, Sugar, Wallet } from '@element-plus/icons-vue'
 import type { UserProfile } from '@/types/chat'
 import { useProfileStore } from '@/stores/profile'
 import { getLocation, getLocationByCoords, browserGeoLocation } from '@/api/location'
+import TagInput from './TagInput.vue'
 
 const profileStore = useProfileStore()
 
@@ -17,13 +18,42 @@ const healthGoals = ref<string[]>(splitGoals(profileStore.health_goals))
 const region = ref(profileStore.region)
 const locating = ref(false)
 
-const GOALS = ['高蛋白', '增肌', '控油', '控糖', '减脂']
-
-// 口味预设（点击切换，逗号分隔存储）
-const FLAVOR_PRESETS = ['辣', '清淡', '甜', '酸', '鲜', '咸香', '孜然', '蒜香']
+// 口味预设（点击切换，逗号分隔存储；回车可新增自定义预设）
+const FLAVOR_PRESETS = ref(['辣', '清淡', '甜', '酸', '鲜', '咸香', '孜然', '蒜香'])
 
 function flavorList(): string[] {
   return flavor.value.split(/[,，]/).map((s) => s.trim()).filter(Boolean)
+}
+
+/** 已选口味数组（只读，展示用） */
+const flavorArray = computed<string[]>(() => flavorList())
+
+// 输入框文本（回车添加到已选）
+const flavorText = ref('')
+
+/** 输入框回车：添加为已选口味，同时加入预设列表 */
+function addFlavorFromInput(): void {
+  const item = flavorText.value.trim()
+  if (!item) return
+  if (!flavorArray.value.includes(item)) {
+    flavor.value = [...flavorArray.value, item].join('，')
+  }
+  if (!FLAVOR_PRESETS.value.includes(item)) {
+    FLAVOR_PRESETS.value.push(item)
+  }
+  flavorText.value = ''
+}
+
+/** 移除某个已选口味 */
+function removeFlavorItem(item: string): void {
+  flavor.value = flavorArray.value.filter((x) => x !== item).join('，')
+}
+
+/** 输入框为空时按退格：移除最后一个已选 */
+function onFlavorBackspace(): void {
+  if (!flavorText.value && flavorArray.value.length) {
+    flavor.value = flavorArray.value.slice(0, -1).join('，')
+  }
 }
 
 function hasFlavor(fp: string): boolean {
@@ -41,35 +71,64 @@ function toggleFlavor(fp: string): void {
   flavor.value = list.join('，')
 }
 
-// 常见忌口项（多选）+ 自定义补充
-const COMMON_RESTRICTIONS = [
-  '不吃辣',
-  '不吃香菜',
-  '不吃葱姜蒜',
-  '不吃猪肉',
-  '不吃牛羊肉',
-  '清真',
-  '素食',
-  '海鲜过敏',
-  '花生过敏',
-  '乳糖不耐',
-]
+/** 移除预设标签：从预设列表移除，同时取消已选中状态 */
+function removeFlavorPreset(fp: string): void {
+  FLAVOR_PRESETS.value = FLAVOR_PRESETS.value.filter((x) => x !== fp)
+  if (hasFlavor(fp)) {
+    toggleFlavor(fp)
+  }
+}
 
-// 从持久化串加载：常见项进多选，其余进自定义补充
-const persistedRestrictions = (profileStore.dietary_restrictions || '')
-  .split(',')
-  .map((s) => s.trim())
-  .filter(Boolean)
+// 已选忌口/过敏（标签输入）
 const restrictions = ref<string[]>(
-  persistedRestrictions.filter((r) => COMMON_RESTRICTIONS.includes(r)),
-)
-const customRestriction = ref(
-  persistedRestrictions.filter((r) => !COMMON_RESTRICTIONS.includes(r)).join(','),
+  (profileStore.dietary_restrictions || '')
+    .split(/[,，]/)
+    .map((s) => s.trim())
+    .filter(Boolean),
 )
 
 /** 逗号分隔字符串 <-> 数组 */
 function splitGoals(s: string): string[] {
-  return (s || '').split(',').map((g) => g.trim()).filter(Boolean)
+  return (s || '').split(/[,，]/).map((g) => g.trim()).filter(Boolean)
+}
+
+// 健康目标预设（点击切换）
+const GOAL_PRESETS = ref(['高蛋白', '增肌', '控油', '控糖', '减脂'])
+
+function hasGoal(g: string): boolean {
+  return healthGoals.value.includes(g)
+}
+
+function toggleGoal(g: string): void {
+  const i = healthGoals.value.indexOf(g)
+  if (i >= 0) healthGoals.value.splice(i, 1)
+  else healthGoals.value.push(g)
+}
+
+function removeGoalPreset(g: string): void {
+  GOAL_PRESETS.value = GOAL_PRESETS.value.filter((x) => x !== g)
+  if (hasGoal(g)) toggleGoal(g)
+}
+
+// 忌口/过敏预设（点击切换）
+const RESTRICTION_PRESETS = ref([
+  '不吃辣', '不吃香菜', '不吃葱姜蒜', '不吃猪肉', '不吃牛羊肉',
+  '清真', '素食', '海鲜过敏', '花生过敏', '乳糖不耐',
+])
+
+function hasRestriction(r: string): boolean {
+  return restrictions.value.includes(r)
+}
+
+function toggleRestriction(r: string): void {
+  const i = restrictions.value.indexOf(r)
+  if (i >= 0) restrictions.value.splice(i, 1)
+  else restrictions.value.push(r)
+}
+
+function removeRestrictionPreset(r: string): void {
+  RESTRICTION_PRESETS.value = RESTRICTION_PRESETS.value.filter((x) => x !== r)
+  if (hasRestriction(r)) toggleRestriction(r)
 }
 
 // 后端画像加载完成 / 重置后，同步到表单
@@ -79,6 +138,7 @@ watch(
     budgetRange.value = [p.budget_min, p.budget]
     flavor.value = p.flavor_preferences
     healthGoals.value = splitGoals(p.health_goals)
+    restrictions.value = splitGoals(p.dietary_restrictions)
     region.value = p.region || ''
   },
   { deep: true },
@@ -115,17 +175,12 @@ async function locate(): Promise<void> {
 }
 
 async function save(): Promise<void> {
-  const custom = customRestriction.value
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-  const all = [...new Set([...restrictions.value, ...custom])]
   const profile: UserProfile = {
     budget: budgetRange.value[1],
     budget_min: budgetRange.value[0],
     flavor_preferences: flavor.value,
     health_goals: healthGoals.value.join(','),
-    dietary_restrictions: all.join(','),
+    dietary_restrictions: [...new Set(restrictions.value)].join(','),
     region: region.value,
   }
   await profileStore.save(profile)
@@ -139,7 +194,6 @@ function reset(): void {
   healthGoals.value = []
   region.value = ''
   restrictions.value = []
-  customRestriction.value = ''
   ElMessage.info('已恢复默认')
 }
 
@@ -179,50 +233,77 @@ defineExpose({ save })
           class="preset-tag"
           :type="hasFlavor(fp) ? 'primary' : 'info'"
           effect="plain"
+          closable
           @click="toggleFlavor(fp)"
+          @close="removeFlavorPreset(fp)"
         >
           {{ fp }}
         </el-tag>
       </div>
       <div class="pf-body">
-        <el-input
-          v-model="flavor"
-          placeholder="如：清淡，辣，甜（中文逗号分隔）"
-          clearable
-        />
+        <div class="flavor-input-wrap">
+          <template v-for="f in flavorArray" :key="f">
+            <el-tag
+              size="small"
+              closable
+              class="flavor-input-tag"
+              @close="removeFlavorItem(f)"
+            >
+              {{ f }}
+            </el-tag>
+          </template>
+          <input
+            v-model="flavorText"
+            class="flavor-input"
+            placeholder="输入口味后回车添加"
+            @keydown.enter.prevent="addFlavorFromInput"
+            @keydown.backspace="onFlavorBackspace"
+          />
+        </div>
       </div>
     </div>
 
     <div class="pf-section">
-      <div class="pf-title"><el-icon><FirstAidKit /></el-icon>健康目标（可多选）</div>
-      <div class="pf-body">
-        <el-select
-          v-model="healthGoals"
-          multiple
-          collapse-tags
-          collapse-tags-tooltip
-          :max-collapse-tags="3"
-          placeholder="选填，可多选"
-          clearable
-          style="width: 100%"
+      <div class="pf-title"><el-icon><FirstAidKit /></el-icon>健康目标</div>
+      <div class="pf-body flavor-presets">
+        <el-tag
+          v-for="g in GOAL_PRESETS"
+          :key="g"
+          :class="{ active: hasGoal(g) }"
+          class="preset-tag"
+          :type="hasGoal(g) ? 'primary' : 'info'"
+          effect="plain"
+          closable
+          @click="toggleGoal(g)"
+          @close="removeGoalPreset(g)"
         >
-          <el-option v-for="g in GOALS" :key="g" :label="g" :value="g" />
-        </el-select>
+          {{ g }}
+        </el-tag>
+      </div>
+      <div class="pf-body">
+        <TagInput v-model="healthGoals" placeholder="输入健康目标后回车添加，如：高蛋白、减脂" />
       </div>
     </div>
 
     <div class="pf-section">
       <div class="pf-title"><el-icon><NoSmoking /></el-icon>忌口 / 过敏</div>
+      <div class="pf-body flavor-presets">
+        <el-tag
+          v-for="r in RESTRICTION_PRESETS"
+          :key="r"
+          :class="{ active: hasRestriction(r) }"
+          class="preset-tag"
+          :type="hasRestriction(r) ? 'primary' : 'info'"
+          effect="plain"
+          closable
+          @click="toggleRestriction(r)"
+          @close="removeRestrictionPreset(r)"
+        >
+          {{ r }}
+        </el-tag>
+      </div>
       <div class="pf-body">
-        <el-checkbox-group v-model="restrictions" class="pf-restrictions">
-          <el-checkbox v-for="r in COMMON_RESTRICTIONS" :key="r" :label="r" />
-        </el-checkbox-group>
-        <el-input
-          v-model="customRestriction"
-          placeholder="其他忌口（如：不吃茄子、鸡蛋过敏），逗号分隔"
-          clearable
-          class="pf-restriction-input"
-        />
+        <TagInput v-model="restrictions" placeholder="输入忌口/过敏后回车添加，如：不吃香菜、花生过敏" />
       </div>
     </div>
 
@@ -322,6 +403,40 @@ defineExpose({ save })
   transform: translateY(-1px);
 }
 
+/* 口味偏好：自定义标签输入框（模拟 el-select 外观） */
+.flavor-input-wrap {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 32px;
+  padding: 2px 8px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 4px;
+  background: #fff;
+  transition: border-color 0.2s;
+  cursor: text;
+}
+
+.flavor-input-wrap:focus-within {
+  border-color: var(--el-color-primary);
+}
+
+.flavor-input-tag {
+  margin: 2px 0;
+}
+
+.flavor-input {
+  flex: 1;
+  min-width: 80px;
+  border: none;
+  outline: none;
+  padding: 4px 2px;
+  font-size: 13px;
+  color: #303133;
+  background: transparent;
+}
+
 .pf-slider {
   flex: 1;
 }
@@ -329,17 +444,6 @@ defineExpose({ save })
 .unit {
   color: #909399;
   white-space: nowrap;
-}
-
-.pf-restrictions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 16px;
-  margin-bottom: 12px;
-}
-
-.pf-restriction-input {
-  max-width: 420px;
 }
 
 .region-row {

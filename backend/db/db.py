@@ -7,7 +7,18 @@ from typing import Optional
 
 # 默认 DB_PATH 基于 backend/ 包根目录解析（与运行目录无关，避免 backend/backend 嵌套）
 _BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.getenv("DB_PATH") or os.path.join(_BACKEND_ROOT, "data", "canteen.db")
+_db_env = os.getenv("DB_PATH")
+if _db_env:
+    if os.path.isabs(_db_env):
+        DB_PATH = _db_env
+    elif _db_env.startswith("backend/"):
+        # 项目根相对（如 backend/data/canteen.db）→ 基于仓库根
+        DB_PATH = os.path.join(os.path.dirname(_BACKEND_ROOT), _db_env)
+    else:
+        # 相对 backend 根（如 data/canteen.db）
+        DB_PATH = os.path.join(_BACKEND_ROOT, _db_env)
+else:
+    DB_PATH = os.path.join(_BACKEND_ROOT, "data", "canteen.db")
 SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "schema.sql")
 
 

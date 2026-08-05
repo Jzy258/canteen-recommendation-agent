@@ -34,8 +34,9 @@ function buildPrompt(text: string): string {
 function scrollToBottom(): void {
   nextTick(() => {
     const el = listRef.value
-    if (el && typeof el.scrollTo === 'function') {
-      el.scrollTo({ top: el.scrollHeight })
+    if (el) {
+      // 直接设置 scrollTop 更可靠（部分环境 el.scrollTo options 不生效）
+      el.scrollTop = el.scrollHeight
     }
   })
 }
@@ -308,12 +309,12 @@ onActivated(() => {
 .chat-page {
   max-width: 860px;
   margin: 0 auto;
-  flex: 1;
-  min-height: 0;
+  /* 限制在视口内：100vh - 顶部导航栏高度 */
+  height: calc(100vh - 56px);
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  box-sizing: border-box;
-  padding: 16px;
+  padding: 12px 16px;
   width: 100%;
 }
 
@@ -322,6 +323,17 @@ onActivated(() => {
   flex-direction: column;
   flex: 1;
   border-radius: 16px;
+  /* el-card 默认 body 不参与 flex，需限制高度才能让列表内部滚动 */
+  overflow: hidden;
+}
+
+.chat-card :deep(.el-card__body) {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
 }
 
 .chat-header {
@@ -514,7 +526,7 @@ onActivated(() => {
 
 .chat-input {
   border-top: 1px solid #e4e7ed;
-  padding-top: 12px;
+  padding: 12px 16px 16px;
 }
 
 /* 快捷提问 chips（B7） */

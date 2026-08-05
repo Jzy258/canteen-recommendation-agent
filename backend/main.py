@@ -195,6 +195,7 @@ class ProfileUpdateRequest(BaseModel):
     budget: float | None = None
     budget_min: float | None = None
     flavor_preferences: str | None = None
+    dietary_restrictions: str | None = None
     health_goals: str | None = None
 
 
@@ -208,6 +209,7 @@ def get_profile(user: dict | None = Depends(get_optional_user)):
         "budget": p.get("budget", 20),
         "budget_min": p.get("budget_min", 0),
         "flavor_preferences": p.get("flavor_preferences", ""),
+        "dietary_restrictions": p.get("dietary_restrictions", ""),
         "health_goals": p.get("health_goals", ""),
     }
 
@@ -223,6 +225,7 @@ def update_profile(req: ProfileUpdateRequest,
         budget=req.budget if req.budget is not None else 0,
         budget_min=req.budget_min if req.budget_min is not None else 0,
         flavor_preferences=req.flavor_preferences or "",
+        dietary_restrictions=req.dietary_restrictions or "",
         health_goals=req.health_goals or "",
         user_id=uid,
     )

@@ -66,6 +66,7 @@ export const useProfileStore = defineStore('profile', {
         this.budget = p.budget ?? DEFAULT_PROFILE.budget
         this.budget_min = p.budget_min ?? DEFAULT_PROFILE.budget_min
         this.flavor_preferences = p.flavor_preferences || ''
+        this.dietary_restrictions = p.dietary_restrictions || ''
         this.health_goals = p.health_goals || ''
         this.configured = true
       } catch {
@@ -89,6 +90,7 @@ export const useProfileStore = defineStore('profile', {
           budget: p.budget,
           budget_min: p.budget_min,
           flavor_preferences: p.flavor_preferences,
+          dietary_restrictions: p.dietary_restrictions || '',
           health_goals: p.health_goals,
         })
       } finally {
