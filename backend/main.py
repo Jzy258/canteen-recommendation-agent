@@ -18,7 +18,7 @@ from agent.agent import create_agent_executor
 from agent.session import session_store
 from middleware import (RequestMetricsMiddleware, add_tokens, get_metrics,
                         count_tokens, count_messages, clean_markdown,
-                        setup_logging, get_logger)
+                        StreamMarkdownCleaner, setup_logging, get_logger)
 from version import APP_NAME, VERSION
 from auth import auth_router, get_optional_user
 
@@ -172,22 +172,34 @@ def _stream_reply(session_id: str, message: str):
         yield f"data: {json.dumps({'type': 'session', 'session_id': session_id}, ensure_ascii=False)}\n\n"
         buffer = []
         errored = False
+        cleaner = StreamMarkdownCleaner()
+        # 过滤工具调用中间输出（避免前端看到 {"name":"recommend",...} 等 JSON）：
+        # 工具调用的 AIMessageChunk 带 tool_call_chunks，其 content 属中间过程，
+        # 实时丢弃；最终回复的 chunk 无 tool_call_chunks，正常实时推送。
         try:
             async for event in agent.astream_events(
                     {"messages": messages}, version="v2"):
-                if event.get("event") == "on_chat_model_stream":
+                ev = event.get("event")
+                if ev == "on_chat_model_stream":
                     chunk = event["data"]["chunk"]
+                    # 工具调用 chunk：一律丢弃其 content，避免 JSON 泄露
+                    if getattr(chunk, "tool_call_chunks", None):
+                        continue
                     delta = chunk.content if isinstance(chunk.content, str) else ""
                     if delta:
-                        buffer.append(delta)
-                        payload = json.dumps({"type": "delta", "content": delta},
-                                             ensure_ascii=False)
-                        yield f"data: {payload}\n\n"
+                        # 逐增量清洗 Markdown，保证前端实时收到纯文本
+                        clean_delta = cleaner.push(delta)
+                        if clean_delta:
+                            buffer.append(clean_delta)
+                            payload = json.dumps({"type": "delta", "content": clean_delta},
+                                                 ensure_ascii=False)
+                            yield f"data: {payload}\n\n"
         except Exception as e:
             logger.exception("chat/stream 失败 | session=%s | err=%s", session_id, e)
             errored = True
 
-        reply = clean_markdown("".join(buffer))
+        # 兜底：若异常中断且无任何输出，清空流式 cleaner 残留作为回复
+        reply = clean_markdown("".join(buffer) + cleaner.flush())
         if errored or not reply.strip():
             reply = "抱歉，系统处理出错，请稍后再试或换一种问法。"
             payload = json.dumps({"type": "delta", "content": reply},

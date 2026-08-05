@@ -41,6 +41,8 @@ def get_llm():
             temperature=0.3,
             timeout=timeout,
             max_retries=max_retries,
+            # 限制单次生成 token 数，防止模型陷入无限输出占满并发 slot
+            model_kwargs={"num_predict": 512},
         )
     except Exception:
         pass

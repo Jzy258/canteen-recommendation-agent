@@ -66,11 +66,14 @@ def recommend_for_meal(budget: float = 20, preferences: str = "",
     scored = score_dishes(in_budget, user_profile, budget=budget_f)
     top = scored[:top_k]
 
+    # 预计算推荐菜品合计金额，避免 LLM 心算出错
+    total_price = round(sum(float(d["price"]) for d in top), 2)
+
     # 生成可直接展示的推荐话术（确保回复中体现餐次）
     top_names = "、".join(f"{d['name']}({float(d['price']):g}元)" for d in top[:3])
     if top:
         suggestion = (f"现在是{label}时间，建议您尝尝：{top_names}。"
-                      f"（参考自{source}，预算内）")
+                      f"（参考自{source}，预算内，共{total_price:g}元）")
     else:
         suggestion = f"现在是{label}时间，当前预算内暂无合适菜品，建议适当提高预算。"
 
@@ -81,4 +84,5 @@ def recommend_for_meal(budget: float = 20, preferences: str = "",
         "source": source,
         "current_time": date.today().isoformat(),
         "suggestion": suggestion,
+        "total_price": total_price,
     }

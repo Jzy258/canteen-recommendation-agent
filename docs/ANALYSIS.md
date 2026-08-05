@@ -27,7 +27,7 @@
 |------|------|------|
 | NFR-01 | 空输入/异常友好反馈 | 前端拦截 + 后端友好文案 |
 | NFR-02 | 多轮记忆、会话隔离 | `SessionStore`（TTL+上限）+ `session_id` |
-| NFR-03 | 密钥 `.env` 管理 | `.env.example`，不入镜像 |
+| NFR-03 | 密钥 `../backend/.env` 管理 | `.env.example`，不入镜像 |
 | NFR-04 | 日志/耗时/Token 中间件 | `RequestMetricsMiddleware` + `/metrics` |
 | NFR-05 | 工具异常可恢复 | `safe_tool` 兜底包装 |
 | NFR-06 | 数据来源合规 | 菜品 `source` 字段 + 清洗记录 |

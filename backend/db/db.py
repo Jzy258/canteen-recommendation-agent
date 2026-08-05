@@ -261,6 +261,20 @@ class SQLiteDatabase(DatabaseInterface):
         finally:
             conn.close()
 
+    def _ensure_schema(self):
+        """自动初始化：若库不存在 dish 表（如空库/新建库），执行 schema 建表。
+        防止空库导致 no such table 报错；表已存在时无副作用（幂等）。
+        """
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='dish'"
+                ).fetchone()
+                if row is None:
+                    self.init_db()
+        except sqlite3.Error:
+            pass
+
     def init_db(self):
         with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
             schema = f.read()
