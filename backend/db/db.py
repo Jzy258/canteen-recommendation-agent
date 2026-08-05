@@ -194,7 +194,9 @@ class SQLiteDatabase(DatabaseInterface):
           避免 CREATE INDEX ON user_id 在旧列缺失时报错
         - 新库 → 直接执行 schema"""
         try:
-            with self._connect() as conn:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            try:
                 has_dish = conn.execute(
                     "SELECT name FROM sqlite_master WHERE type='table' AND name='dish'"
                 ).fetchone()
@@ -202,15 +204,16 @@ class SQLiteDatabase(DatabaseInterface):
                     "SELECT name FROM sqlite_master WHERE type='table' AND name='meal_record'"
                 ).fetchone()
                 if has_dish is None:
-                    # 老库部分表存在时先迁移列，再执行完整 schema 建缺失对象
+                    # 老库部分表存在时先迁移列（同连接内提交，新连接才能看到新列）
                     if has_meal is not None:
                         self._migrate_v11(conn)
                     self.init_db()
-                    return
-                self._migrate_v11(conn)
+                else:
+                    self._migrate_v11(conn)
+            finally:
+                conn.close()
         except sqlite3.Error:
             pass
-
     def _migrate_v11(self, conn):
         """v1.0 → v1.1 增量迁移：
         - 确保 app_user 表存在（旧库无此表时创建）
@@ -244,6 +247,8 @@ class SQLiteDatabase(DatabaseInterface):
                 if column not in cols:
                     conn.execute(
                         f"ALTER TABLE {table} ADD COLUMN {column} INTEGER")
+            # 立即提交迁移，避免后续 init_db() 的新连接看不到新列
+            conn.commit()
         except sqlite3.Error:
             pass
 
@@ -260,20 +265,6 @@ class SQLiteDatabase(DatabaseInterface):
             raise
         finally:
             conn.close()
-
-    def _ensure_schema(self):
-        """自动初始化：若库不存在 dish 表（如空库/新建库），执行 schema 建表。
-        防止空库导致 no such table 报错；表已存在时无副作用（幂等）。
-        """
-        try:
-            with self._connect() as conn:
-                row = conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name='dish'"
-                ).fetchone()
-                if row is None:
-                    self.init_db()
-        except sqlite3.Error:
-            pass
 
     def init_db(self):
         with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
