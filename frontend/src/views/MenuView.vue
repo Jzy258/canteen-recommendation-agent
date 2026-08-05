@@ -7,29 +7,6 @@ import { getDishes, type MenuDish } from '@/api/menu'
 const dishes = ref<MenuDish[]>([])
 const loading = ref(false)
 
-// 分类 → emoji 图标（与聊天菜品卡片一致）
-const CATEGORY_EMOJI: Record<string, string> = {
-  荤菜: '🍖', 素菜: '🥬', 汤: '🍲', 主食: '🍚', 水果: '🍎', 饮品: '🥤',
-}
-
-function emoji(category?: string): string {
-  return (category && CATEGORY_EMOJI[category]) || '🍽️'
-}
-
-// 顶部统计徽章：总数 / 价格范围 / 热量范围
-const summary = computed(() => {
-  if (!dishes.value.length) return null
-  const prices = dishes.value.map((d) => Number(d.price) || 0)
-  const cals = dishes.value.map((d) => Number(d.calories) || 0)
-  return {
-    total: dishes.value.length,
-    priceMin: Math.min(...prices),
-    priceMax: Math.max(...prices),
-    calMin: Math.min(...cals),
-    calMax: Math.max(...cals),
-  }
-})
-
 // 参考截图：素食/不辣/粥类/面食/低热量 等标签（前端规则计算）
 function tags(d: MenuDish): string[] {
   const t: string[] = []
@@ -42,6 +19,80 @@ function tags(d: MenuDish): string[] {
   if (Number(d.calories) > 0 && Number(d.calories) <= 150) t.push('低热量')
   return t
 }
+
+
+// ===== 筛选状态（UI 控件实时绑定，交集过滤）=====
+const keyword = ref('')                    // 菜名模糊搜索
+const categorySel = ref<string[]>([])      // 类别多选：荤菜/素菜/主食/汤品
+const spiceSel = ref<string[]>([])         // 辣度多选：不辣/微辣/中辣/重辣
+const priceMin = ref<number | undefined>() // 价格区间
+const priceMax = ref<number | undefined>()
+const calMin = ref<number | undefined>()   // 热量区间
+const calMax = ref<number | undefined>()
+const protMin = ref<number | undefined>()  // 蛋白质区间
+const protMax = ref<number | undefined>()
+const sortBy = ref('')                     // 排序：cal-asc / cal-desc / price-asc / price-desc
+
+// 类别筛选选项（“汤品”匹配 category === '汤'）
+const CATEGORY_OPTIONS = [
+  { label: '荤菜', value: '荤菜' },
+  { label: '素菜', value: '素菜' },
+  { label: '主食', value: '主食' },
+  { label: '汤品', value: '汤' },
+]
+
+// 辣度映射：根据 flavor_tags 判断（数据多为“辣”，默认按中辣；支持微/中/重辣关键词）
+function spiceLevel(d: MenuDish): string {
+  const f = String(d.flavor_tags || '')
+  if (!f.includes('辣')) return '不辣'
+  if (f.includes('重辣')) return '重辣'
+  if (f.includes('中辣')) return '中辣'
+  if (f.includes('微辣')) return '微辣'
+  return '中辣'
+}
+
+// 筛选结果（全部条件为交集，实时计算；含排序）
+const filtered = computed(() => {
+  let list = dishes.value
+  const kw = keyword.value.trim()
+  if (kw) list = list.filter((d) => (d.name || '').includes(kw))
+  if (categorySel.value.length) {
+    list = list.filter((d) => categorySel.value.includes(String(d.category || '')))
+  }
+  if (spiceSel.value.length) {
+    list = list.filter((d) => spiceSel.value.includes(spiceLevel(d)))
+  }
+  const pMin = priceMin.value, pMax = priceMax.value
+  if (pMin != null) list = list.filter((d) => Number(d.price) >= pMin)
+  if (pMax != null) list = list.filter((d) => Number(d.price) <= pMax)
+  const cMin = calMin.value, cMax = calMax.value
+  if (cMin != null) list = list.filter((d) => Number(d.calories) >= cMin)
+  if (cMax != null) list = list.filter((d) => Number(d.calories) <= cMax)
+  const rMin = protMin.value, rMax = protMax.value
+  if (rMin != null) list = list.filter((d) => Number(d.protein) >= rMin)
+  if (rMax != null) list = list.filter((d) => Number(d.protein) <= rMax)
+  const s = sortBy.value
+  if (s) {
+    const key = s.startsWith('price') ? 'price' : 'calories'
+    const desc = s.endsWith('desc')
+    list = [...list].sort((a, b) => (Number(a[key]) - Number(b[key])) * (desc ? -1 : 1))
+  }
+  return list
+})
+
+function resetFilters(): void {
+  keyword.value = ''
+  categorySel.value = []
+  spiceSel.value = []
+  priceMin.value = undefined
+  priceMax.value = undefined
+  calMin.value = undefined
+  calMax.value = undefined
+  protMin.value = undefined
+  protMax.value = undefined
+  sortBy.value = ''
+}
+
 
 async function load(): Promise<void> {
   loading.value = true
@@ -67,18 +118,65 @@ onMounted(load)
         </span>
       </template>
 
-      <!-- 顶部统计徽章 -->
-      <div v-if="summary" class="menu-summary">
-        <span class="ms-badge">找到 {{ summary.total }} 道</span>
-        <span class="ms-badge">价格 {{ summary.priceMin.toFixed(2) }}-{{ summary.priceMax.toFixed(2) }} 元</span>
-        <span class="ms-badge">热量 {{ summary.calMin }}-{{ summary.calMax }} kcal</span>
+      <!-- 筛选组件区域 -->
+      <div class="menu-filter">
+        <div class="mf-row">
+          <el-input v-model="keyword" placeholder="搜索菜名…" clearable class="mf-search" />
+          <el-select v-model="sortBy" placeholder="排序" clearable class="mf-sort">
+            <el-option label="热量升序" value="cal-asc" />
+            <el-option label="热量降序" value="cal-desc" />
+            <el-option label="价格升序" value="price-asc" />
+            <el-option label="价格降序" value="price-desc" />
+          </el-select>
+          <el-button @click="resetFilters">重置</el-button>
+        </div>
+
+        <div class="mf-row">
+          <span class="mf-label">类别</span>
+          <el-checkbox-group v-model="categorySel">
+            <el-checkbox v-for="opt in CATEGORY_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</el-checkbox>
+          </el-checkbox-group>
+        </div>
+
+        <div class="mf-row">
+          <span class="mf-label">辣度</span>
+          <el-checkbox-group v-model="spiceSel">
+            <el-checkbox value="不辣">不辣</el-checkbox>
+            <el-checkbox value="微辣">微辣</el-checkbox>
+            <el-checkbox value="中辣">中辣</el-checkbox>
+            <el-checkbox value="重辣">重辣</el-checkbox>
+          </el-checkbox-group>
+        </div>
+
+        <div class="mf-row">
+          <span class="mf-label">价格</span>
+          <el-input-number v-model="priceMin" :min="0" :max="100" placeholder="最低" controls-position="right" class="mf-num" />
+          <span class="mf-sep">-</span>
+          <el-input-number v-model="priceMax" :min="0" :max="100" placeholder="最高" controls-position="right" class="mf-num" />
+          <span class="mf-unit">元</span>
+        </div>
+
+        <div class="mf-row">
+          <span class="mf-label">热量</span>
+          <el-input-number v-model="calMin" :min="0" :max="2000" placeholder="最低" controls-position="right" class="mf-num" />
+          <span class="mf-sep">-</span>
+          <el-input-number v-model="calMax" :min="0" :max="2000" placeholder="最高" controls-position="right" class="mf-num" />
+          <span class="mf-unit">kcal</span>
+        </div>
+
+        <div class="mf-row">
+          <span class="mf-label">蛋白质</span>
+          <el-input-number v-model="protMin" :min="0" :max="100" placeholder="最低" controls-position="right" class="mf-num" />
+          <span class="mf-sep">-</span>
+          <el-input-number v-model="protMax" :min="0" :max="100" placeholder="最高" controls-position="right" class="mf-num" />
+          <span class="mf-unit">g</span>
+        </div>
       </div>
 
       <!-- 菜品卡片网格 -->
       <div v-loading="loading" class="menu-grid">
-        <div v-for="d in dishes" :key="d.id" class="menu-item">
+        <div v-for="d in filtered" :key="d.id" class="menu-item">
           <div class="mi-cat">{{ d.category }}</div>
-          <div class="mi-emoji">{{ emoji(d.category) }}</div>
           <div class="mi-name">{{ d.name }}</div>
           <div class="mi-price">¥{{ Number(d.price).toFixed(2) }}</div>
           <div class="mi-nut">
@@ -90,6 +188,11 @@ onMounted(load)
           </div>
         </div>
         <el-empty v-if="!loading && !dishes.length" description="暂无菜品" />
+      </div>
+
+      <!-- 无匹配结果提示 -->
+      <div v-if="!loading && dishes.length && !filtered.length" class="menu-empty-tip">
+        没有找到符合筛选条件的菜品，请调整筛选条件
       </div>
     </el-card>
   </div>
@@ -108,6 +211,60 @@ onMounted(load)
   border-radius: 16px;
 }
 
+/* 筛选组件区域 */
+.menu-filter {
+  border: 1px solid var(--el-color-primary-light-8);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mf-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.mf-search {
+  width: 240px;
+}
+
+.mf-sort {
+  width: 130px;
+}
+
+.mf-label {
+  font-size: 13px;
+  color: #606266;
+  white-space: nowrap;
+  min-width: 44px;
+}
+
+.mf-num {
+  width: 110px;
+}
+
+.mf-sep {
+  color: #909399;
+}
+
+.mf-unit {
+  color: #909399;
+  font-size: 12px;
+}
+
+.menu-empty-tip {
+  padding: 40px 0;
+  text-align: center;
+  color: #909399;
+  font-size: 14px;
+}
+
 .menu-title {
   display: flex;
   align-items: center;
@@ -118,23 +275,6 @@ onMounted(load)
 
 .menu-title .el-icon {
   color: var(--el-color-primary);
-}
-
-/* 顶部统计徽章 */
-.menu-summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 16px;
-}
-
-.ms-badge {
-  padding: 4px 12px;
-  border-radius: 999px;
-  font-size: 13px;
-  background: var(--el-color-primary-light-9);
-  color: var(--el-color-primary);
-  border: 1px solid var(--el-color-primary-light-7);
 }
 
 /* 菜品卡片网格 */
@@ -167,13 +307,6 @@ onMounted(load)
   font-weight: 700;
   background: var(--el-color-primary-light-9);
   color: var(--el-color-primary);
-}
-
-.mi-emoji {
-  position: absolute;
-  top: 14px;
-  right: 16px;
-  font-size: 24px;
 }
 
 .mi-name {
