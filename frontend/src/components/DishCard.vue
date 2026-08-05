@@ -19,6 +19,31 @@ function fmt(v: number | undefined): string {
   return v !== undefined && v > 0 ? String(v) : '--'
 }
 
+// 类别 → emoji 图标映射（建议1）
+const CATEGORY_EMOJI: Record<string, string> = {
+  荤菜: '🍖',
+  素菜: '🥬',
+  汤: '🍲',
+  主食: '🍚',
+  水果: '🍎',
+  饮品: '🥤',
+}
+
+function categoryEmoji(category?: string): string {
+  return (category && CATEGORY_EMOJI[category]) || '🍽️'
+}
+
+// 根据营养数据前端计算营养标签（建议1）
+function nutritionTags(): string[] {
+  const d = props.dish
+  const tags: string[] = []
+  if (d.protein != null && d.protein >= 20) tags.push('高蛋白')
+  if (d.fat != null && d.fat <= 8) tags.push('低脂')
+  if (d.carbs != null && d.carbs >= 40) tags.push('高碳水')
+  if (d.calories != null && d.calories > 0 && d.calories <= 150) tags.push('低卡')
+  return tags
+}
+
 /**
  * 整卡点击处理：
  * - 阻止事件冒泡，避免触发外层 AI 聊天大卡片的点击逻辑；
@@ -40,7 +65,10 @@ function handleDishClick(e: MouseEvent): void {
     @click="handleDishClick"
   >
     <div class="dish-head">
-      <span class="dish-name">{{ dish.name }}</span>
+      <span class="dish-name">
+        <span class="dish-emoji">{{ categoryEmoji(dish.category) }}</span>
+        {{ dish.name }}
+      </span>
       <span class="dish-price">¥{{ dish.price }}</span>
     </div>
     <div class="dish-nutrition">
@@ -48,6 +76,9 @@ function handleDishClick(e: MouseEvent): void {
       <span class="nut"><b>{{ fmt(dish.protein) }}</b> 蛋白</span>
       <span class="nut"><b>{{ fmt(dish.carbs) }}</b> 碳水</span>
       <span class="nut"><b>{{ fmt(dish.fat) }}</b> 脂肪</span>
+    </div>
+    <div v-if="nutritionTags().length" class="dish-tags">
+      <span v-for="tag in nutritionTags()" :key="tag" class="dish-tag">{{ tag }}</span>
     </div>
     <div v-if="dish.reason" class="dish-reason">{{ dish.reason }}</div>
   </div>
@@ -92,6 +123,25 @@ function handleDishClick(e: MouseEvent): void {
   font-weight: 600;
   font-size: 15px;
   color: #303133;
+}
+
+.dish-emoji {
+  margin-right: 4px;
+}
+
+.dish-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.dish-tag {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
 }
 
 .dish-price {

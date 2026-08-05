@@ -52,6 +52,49 @@ app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
 agent = create_agent_executor()
 
+# ---- 推荐类工具输出 -> 前端结构化菜品/组合（建议1/2） ----
+# 普通推荐/检索类工具：返回 list[dict] 或 dict（含 dishes）
+_TOOL_DISH_LIST = {"recommend", "recommend_for_meal", "search_dish",
+                   "get_all_dishes", "retrieve_dishes"}
+# 组合优化工具：返回 dict（含 dishes + 汇总指标）
+_TOOL_COMBO = {"optimize_meal_tool"}
+
+
+def _pick_dish_fields(d: dict) -> dict:
+    """从工具返回的菜品 dict 中提取前端展示所需字段（含 category）。"""
+    return {
+        "name": d.get("name", ""),
+        "price": d.get("price", 0),
+        "calories": d.get("calories"),
+        "protein": d.get("protein"),
+        "carbs": d.get("carbs"),
+        "fat": d.get("fat"),
+        "category": d.get("category", ""),
+        "reason": d.get("reason") or "",
+    }
+
+
+def _normalize_tool_output(tool_name: str, output) -> dict | None:
+    """把推荐/组合类工具的输出规范化为前端事件载荷。
+    返回 {"dishes": [...]} 或 {"combo": {...}}；非相关工具返回 None。"""
+    if output is None:
+        return None
+    if tool_name in _TOOL_COMBO:
+        combo = dict(output)
+        combo["dishes"] = [_pick_dish_fields(d) for d in (output.get("dishes") or [])]
+        return {"combo": combo}
+    if tool_name in _TOOL_DISH_LIST:
+        if isinstance(output, dict) and "dishes" in output:
+            dishes = output["dishes"]
+        elif isinstance(output, dict):
+            dishes = [output]
+        elif isinstance(output, list):
+            dishes = output
+        else:
+            return None
+        return {"dishes": [_pick_dish_fields(d) for d in dishes]}
+    return None
+
 # 会话管理（线程安全 + TTL 过期 + 数量上限）由 SessionStore 承担
 
 
@@ -121,6 +164,13 @@ def location(request: Request, lng: float | None = None, lat: float | None = Non
         return {"city": auto_locate_city(client_ip) or ""}
     except Exception:
         return {"city": ""}
+
+
+@app.get("/dishes")
+def dishes():
+    """菜单页：返回全部菜品（含分类/价格/营养/口味标签）。"""
+    from db import get_db
+    return get_db().get_all_dishes()
 
 
 def _reverse_geocode(lng: float, lat: float) -> str:
@@ -341,6 +391,21 @@ def _stream_reply(session_id: str, message: str):
                             })
                         if dish_data:
                             yield f"data: {json.dumps({'type': 'dishes', 'dishes': dish_data}, ensure_ascii=False)}\n\n"
+                    elif name == "optimize_meal_tool":
+                        # 组合优化工具：把结果作为 combo 事件下发（建议2：组合卡）
+                        combo = None
+                        if isinstance(out, dict):
+                            combo = out
+                        elif hasattr(out, "content") and isinstance(out.content, str) and out.content.strip():
+                            try:
+                                combo = json.loads(out.content)
+                            except Exception:
+                                combo = None
+                        if isinstance(combo, dict) and combo.get("dishes"):
+                            combo = dict(combo)
+                            combo["dishes"] = [_pick_dish_fields(d) for d in combo["dishes"]
+                                               if isinstance(d, dict)]
+                            yield f"data: {json.dumps({'type': 'combo', 'combo': combo}, ensure_ascii=False)}\n\n"
         except Exception as e:
             logger.exception("chat/stream 失败 | session=%s | err=%s", session_id, e)
             errored = True

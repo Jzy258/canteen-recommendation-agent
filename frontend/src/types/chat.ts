@@ -40,7 +40,17 @@ export interface StreamDishesEvent {
   dishes: ParsedDish[]
 }
 
-export type StreamEvent = StreamSessionEvent | StreamDeltaEvent | StreamDoneEvent | StreamDishesEvent
+export interface StreamComboEvent {
+  type: 'combo'
+  combo: ComboMeal
+}
+
+export type StreamEvent =
+  | StreamSessionEvent
+  | StreamDeltaEvent
+  | StreamDoneEvent
+  | StreamDishesEvent
+  | StreamComboEvent
 
 export interface ParsedDish {
   name: string
@@ -50,6 +60,23 @@ export interface ParsedDish {
   protein?: number
   carbs?: number
   fat?: number
+  /** 菜品类别：荤菜/素菜/汤/主食/水果/饮品（后端推荐工具返回） */
+  category?: string
+}
+
+/** 组合优化结果（optimize_meal_tool 输出，用于组合卡渲染） */
+export interface ComboMeal {
+  dishes: ParsedDish[]
+  total_price: number
+  total_calories: number
+  total_protein: number
+  total_carbs: number
+  total_fat: number
+  categories: Record<string, number>
+  budget: number
+  calorie_limit: number
+  balance_ok: boolean
+  reason: string
 }
 
 /** 历史饮食记录（后端 GET /records 返回） */
@@ -75,6 +102,8 @@ export interface ChatMessage {
   content: string
   time?: string
   dishes?: ParsedDish[]
+  /** 组合优化推荐（后端 combo 事件），渲染组合卡 */
+  combo?: ComboMeal
 }
 
 export interface TrendPoint {

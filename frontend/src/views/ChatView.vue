@@ -6,9 +6,11 @@ import { chat, chatStream } from '@/api/chat'
 import { parseDishes } from '@/utils/parseDishes'
 import { track } from '@/utils/analytics'
 import DishCard from '@/components/DishCard.vue'
+import MealComboCard from '@/components/MealComboCard.vue'
+import TodayOverview from '@/components/TodayOverview.vue'
 import { useChatStore } from '@/stores/chat'
 import { useProfileStore } from '@/stores/profile'
-import type { ChatMessage, ParsedDish } from '@/types/chat'
+import type { ChatMessage, ComboMeal, ParsedDish } from '@/types/chat'
 
 const chatStore = useChatStore()
 const profileStore = useProfileStore()
@@ -111,6 +113,14 @@ function handleDishCardClick(dishItem: ParsedDish): void {
   nextTick(() => inputRef.value?.focus?.())
 }
 
+/**
+ * 今日工作台「今日吃什么」入口：填入输入框并聚焦，不自动发送。
+ */
+function handleTodayRecommend(): void {
+  input.value = '推荐今天吃什么'
+  nextTick(() => inputRef.value?.focus?.())
+}
+
 async function sendByStream(text: string): Promise<'ok' | 'aborted' | 'failed'> {
   const sid = chatStore.sessionId || undefined
   const prompt = buildPrompt(text)
@@ -118,6 +128,7 @@ async function sendByStream(text: string): Promise<'ok' | 'aborted' | 'failed'> 
   let succeeded = false
   // 菜品数据暂存，对话结束后（done）再赋给消息，避免流式中途显示卡片
   let pendingDishes: ParsedDish[] | null = null
+  let pendingCombo: ComboMeal | null = null
   try {
     await chatStream(
       { message: prompt, session_id: sid },
@@ -131,9 +142,19 @@ async function sendByStream(text: string): Promise<'ok' | 'aborted' | 'failed'> 
           if (event.dishes?.length) {
             pendingDishes = event.dishes
           }
+        } else if (event.type === 'combo') {
+          // 组合优化结果（建议2）：暂存，等 done 后统一挂载组合卡
+          if (event.combo?.dishes?.length) {
+            pendingCombo = event.combo
+          }
         } else if (event.type === 'done') {
           succeeded = true
-          // 对话结束：此时才挂载菜品卡片
+          // 对话结束：此时才挂载菜品卡片 / 组合卡
+          if (pendingCombo) {
+            currentAssistant().combo = pendingCombo
+            currentAssistant().dishes = pendingCombo.dishes
+            pendingCombo = null
+          }
           if (pendingDishes?.length) {
             currentAssistant().dishes = pendingDishes
             pendingDishes = null
@@ -257,6 +278,9 @@ onActivated(() => {
 
       <div ref="listRef" class="chat-list">
         <!-- 欢迎引导卡（B8） -->
+        <!-- 今日工作台（建议5）：欢迎态展示 -->
+        <TodayOverview v-if="messages.length === 0" @recommend="handleTodayRecommend" />
+
         <div v-if="messages.length === 0" class="chat-welcome">
           <div class="welcome-title">你好！我是食堂点餐参谋 👋</div>
           <div class="welcome-sub">
@@ -286,7 +310,11 @@ onActivated(() => {
           <div class="chat-body">
             <div class="chat-time">{{ msg.time }}</div>
             <div class="chat-bubble">{{ msg.content }}</div>
-            <div v-if="msg.dishes && msg.dishes.length" class="dish-grid">
+            <!-- 组合优化推荐（建议2）：优先渲染组合卡 -->
+            <div v-if="msg.combo && msg.combo.dishes?.length" class="combo-area">
+              <MealComboCard :combo="msg.combo" @onDishCardClick="handleDishCardClick" />
+            </div>
+            <div v-else-if="msg.dishes && msg.dishes.length" class="dish-grid">
               <DishCard
                 v-for="d in msg.dishes"
                 :key="d.name"

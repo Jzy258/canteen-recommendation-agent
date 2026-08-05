@@ -10,6 +10,7 @@ const router = createRouter({
   routes: [
     { path: '/', name: 'chat', component: () => import('@/views/ChatView.vue'), meta: { requiresAuth: true } },
     { path: '/trend', name: 'trend', component: () => import('@/views/TrendView.vue'), meta: { requiresAuth: true } },
+    { path: '/menu', name: 'menu', component: () => import('@/views/MenuView.vue'), meta: { requiresAuth: true } },
     { path: '/records', name: 'records', component: () => import('@/views/RecordsView.vue'), meta: { requiresAuth: true } },
     { path: '/profile', name: 'profile', component: () => import('@/views/ProfileView.vue'), meta: { requiresAuth: true } },
     { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue') },

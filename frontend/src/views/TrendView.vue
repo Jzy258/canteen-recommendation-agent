@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, ref } from 'vue'
 import { init, graphic, use, type ECharts } from 'echarts/core'
-import { LineChart } from 'echarts/charts'
+import { BarChart, LineChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import { ElMessage } from 'element-plus'
@@ -10,16 +10,18 @@ import { getTrend } from '@/api/trend'
 import type { TrendPoint } from '@/types/chat'
 
 // P0 · ECharts 按需引入：仅注册用到的图表/组件，显著降低打包体积
-use([LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
+use([BarChart, LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
 
 // 两个独立图表：热量 / 蛋白质·碳水·脂肪
 const calChartRef = ref<HTMLDivElement>()
 const macroChartRef = ref<HTMLDivElement>()
+const compareChartRef = ref<HTMLDivElement>()
 const days = ref(7)
 const loading = ref(false)
 const trend = ref<TrendPoint[]>([])
 let calChart: ECharts | null = null
 let macroChart: ECharts | null = null
+let compareChart: ECharts | null = null
 
 // C10 · 汇总统计
 const stats = computed(() => {
@@ -52,6 +54,35 @@ function ensureChart(
   }
   holder.chart ??= init(refEl)
   return holder.chart
+}
+
+// 营养洞察（建议3）：基于近 N 天数据给出规则化结论，帮助用户快速理解趋势
+// （纯前端规则，不依赖 LLM；后续可升级为 Agent 生成）
+type InsightLevel = 'success' | 'warning' | 'danger'
+const insight = computed<{ level: InsightLevel; text: string } | null>(() => {
+  const pts = trend.value.filter((p) => p.dish_count > 0)
+  if (!pts.length) return null
+  const n = pts.length
+  const avgCal = Math.round(pts.reduce((s, p) => s + p.total_calories, 0) / n)
+  const avgProtein = Math.round(pts.reduce((s, p) => s + p.total_protein, 0) / n)
+  const avgFat = Math.round(pts.reduce((s, p) => s + p.total_fat, 0) / n)
+  if (avgProtein < 40) {
+    return { level: 'warning', text: `近${n}天日均蛋白质仅 ${avgProtein}g，偏低，建议每餐搭配 1 份荤菜或豆制品。` }
+  }
+  if (avgFat > 65) {
+    return { level: 'danger', text: `近${n}天日均脂肪 ${avgFat}g 偏高，建议多选清蒸/白灼类菜品并控制油炸。` }
+  }
+  if (avgCal > 2600) {
+    return { level: 'warning', text: `近${n}天日均热量 ${avgCal} kcal 偏高，注意控制份量。` }
+  }
+  if (avgCal < 1300) {
+    return { level: 'warning', text: `近${n}天日均热量 ${avgCal} kcal 偏低，注意保证基础营养摄入。` }
+  }
+  return { level: 'success', text: `近${n}天摄入相对均衡（日均 ${avgCal} kcal / 蛋白 ${avgProtein}g），继续保持。` }
+})
+
+function insightIcon(level: InsightLevel): string {
+  return level === 'success' ? '✅' : level === 'warning' ? '⚠️' : '🔴'
 }
 
 // 公共 tooltip
@@ -175,6 +206,60 @@ function renderMacroChart(points: TrendPoint[]): void {
   })
 }
 
+// 建议6：近 N 天各营养日均 vs 目标 —— 横向条形图（一眼看出营养是否达标）
+function renderCompareChart(points: TrendPoint[]): void {
+  const chart = ensureChart(compareChartRef.value, { chart: compareChart })
+  if (!chart) return
+  compareChart = chart
+  const pts = points.filter((p) => p.dish_count > 0)
+  const n = pts.length || 1
+  const avg = (key: 'total_calories' | 'total_protein' | 'total_carbs' | 'total_fat'): number =>
+    Math.round(pts.reduce((s, p) => s + (p[key] || 0), 0) / n)
+  // 一份均衡食堂餐的近似目标值（可按需调整）
+  const items = [
+    { name: '热量(kcal)', value: avg('total_calories'), target: 2000, color: '#32b16c' },
+    { name: '蛋白质(g)', value: avg('total_protein'), target: 60, color: '#288e56' },
+    { name: '碳水(g)', value: avg('total_carbs'), target: 260, color: '#e6a23c' },
+    { name: '脂肪(g)', value: avg('total_fat'), target: 60, color: '#f56c6c' },
+  ]
+  chart.setOption({
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    legend: {
+      data: ['日均摄入', '目标参考'],
+      bottom: 4, left: 'center',
+      icon: 'circle', itemWidth: 10, itemHeight: 10,
+      textStyle: { color: '#606266', fontSize: 12 },
+    },
+    grid: { left: 96, right: 52, top: 16, bottom: 44 },
+    xAxis: {
+      type: 'value',
+      axisLabel: { color: '#909399', fontSize: 12 },
+      splitLine: { lineStyle: { color: '#f0f2f5', type: 'dashed' } },
+    },
+    yAxis: {
+      type: 'category',
+      data: items.map((i) => i.name),
+      axisLabel: { color: '#606266', fontSize: 12 },
+    },
+    series: [
+      {
+        name: '日均摄入',
+        type: 'bar',
+        barWidth: 14,
+        data: items.map((i) => ({ value: i.value, itemStyle: { color: i.color, borderRadius: [0, 4, 4, 0] } })),
+        label: { show: true, position: 'right', color: '#606266', fontSize: 11 },
+      },
+      {
+        name: '目标参考',
+        type: 'bar',
+        barWidth: 14,
+        data: items.map((i) => i.target),
+        itemStyle: { color: '#eef0f3', borderRadius: [0, 4, 4, 0] },
+      },
+    ],
+  })
+}
+
 async function load(): Promise<void> {
   loading.value = true
   try {
@@ -187,12 +272,14 @@ async function load(): Promise<void> {
     await nextTick()
     renderCalChart(trend.value)
     renderMacroChart(trend.value)
+    renderCompareChart(trend.value)
   }
 }
 
 function onResize(): void {
   calChart?.resize()
   macroChart?.resize()
+  compareChart?.resize()
 }
 
 onMounted(() => {
@@ -204,12 +291,14 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)
   calChart?.dispose()
   macroChart?.dispose()
+  compareChart?.dispose()
 })
 
 // KeepAlive 激活（切回趋势页）时校正两个图表尺寸
 onActivated(() => {
   calChart?.resize()
   macroChart?.resize()
+  compareChart?.resize()
 })
 </script>
 <template>
@@ -254,6 +343,12 @@ onActivated(() => {
         💡 点击图例中的属性（热量 / 蛋白质 / 碳水 / 脂肪）即可显示/隐藏对应的折线
       </div>
 
+      <!-- AI 洞察：基于近 N 天营养数据的规则化结论（建议3） -->
+      <div v-if="insight" class="trend-insight" :class="insight.level">
+        <span class="insight-icon">{{ insightIcon(insight.level) }}</span>
+        <span>{{ insight.text }}</span>
+      </div>
+
       <!-- 图表一：仅热量趋势 -->
       <div class="trend-chart-block">
         <div class="block-title">🔥 热量趋势</div>
@@ -268,6 +363,15 @@ onActivated(() => {
         <div class="block-title">🍗 蛋白质 / 碳水 / 脂肪</div>
         <div class="trend-chart-wrap">
           <div class="trend-chart" ref="macroChartRef" />
+          <el-skeleton v-if="loading" :rows="5" animated class="trend-skeleton" />
+        </div>
+      </div>
+
+      <!-- 图表三：营养日均对比（建议6，横向条形图） -->
+      <div class="trend-chart-block">
+        <div class="block-title">📊 营养日均对比</div>
+        <div class="trend-chart-wrap">
+          <div class="trend-chart" ref="compareChartRef" />
           <el-skeleton v-if="loading" :rows="5" animated class="trend-skeleton" />
         </div>
       </div>
@@ -324,6 +428,37 @@ onActivated(() => {
   border-radius: 10px;
   padding: 8px 12px;
   margin-bottom: 14px;
+}
+
+/* 营养洞察结论条（建议3） */
+.trend-insight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid;
+  margin-bottom: 14px;
+}
+
+.trend-insight.success {
+  background: var(--el-color-success-light-9);
+  border-color: var(--el-color-success-light-7);
+  color: var(--el-color-success);
+}
+
+.trend-insight.warning {
+  background: var(--el-color-warning-light-9);
+  border-color: var(--el-color-warning-light-7);
+  color: var(--el-color-warning);
+}
+
+.trend-insight.danger {
+  background: var(--el-color-danger-light-9);
+  border-color: var(--el-color-danger-light-7);
+  color: var(--el-color-danger);
 }
 
 /* C10 · 统计卡 */

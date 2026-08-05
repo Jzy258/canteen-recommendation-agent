@@ -62,6 +62,10 @@ function goLogin(): void {
             <span class="nav-logo"><el-icon><ChatDotRound /></el-icon></span>
             <span class="nav-label">聊天</span>
           </el-menu-item>
+          <el-menu-item index="/menu">
+            <span class="nav-logo"><el-icon><KnifeFork /></el-icon></span>
+            <span class="nav-label">菜单</span>
+          </el-menu-item>
           <el-menu-item index="/trend">
             <span class="nav-logo"><el-icon><TrendCharts /></el-icon></span>
             <span class="nav-label">营养趋势</span>
