@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { nextTick, onActivated, ref } from 'vue'
-import { ElMessage } from 'element-plus'
-import { ChatDotRound, Plus, User } from '@element-plus/icons-vue'
-import { chat, chatStream } from '@/api/chat'
+import { nextTick, onActivated, onMounted, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { ChatDotRound, Delete, Plus, User } from '@element-plus/icons-vue'
+import { chat, chatStream, listSessions, getSessionMessages, deleteSession, type ChatSessionItem } from '@/api/chat'
 import { parseDishes } from '@/utils/parseDishes'
 import { track } from '@/utils/analytics'
 import DishCard from '@/components/DishCard.vue'
@@ -25,6 +25,11 @@ const loading = ref(false)
 const streaming = ref(false)
 const listRef = ref<HTMLElement>()
 let abortController: AbortController | null = null
+
+// ---- 历史对话（v1.3） ----
+const sessions = ref<ChatSessionItem[]>([])
+const showHistory = ref(false)
+const historyLoading = ref(false)
 
 function buildPrompt(text: string): string {
   const prefix = profileStore.injectedPrompt
@@ -76,6 +81,69 @@ function finishAssistant(): void {
 
 function fillPrompt(text: string): void {
   input.value = text
+}
+
+function fmtSessionTime(ts: string): string {
+  if (!ts) return ''
+  const d = new Date(ts.replace(' ', 'T'))
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
+async function loadSessionList(): Promise<void> {
+  historyLoading.value = true
+  try {
+    sessions.value = await listSessions()
+  } catch {
+    // 列表加载失败不阻塞聊天
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+async function loadHistory(): Promise<void> {
+  if (!chatStore.sessionId) return
+  try {
+    const items = await getSessionMessages(chatStore.sessionId)
+    messages.value = items.map((m) => ({
+      role: m.role,
+      content: m.content,
+      time: m.created_at ? new Date(m.created_at.replace(' ', 'T')).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : undefined,
+    }))
+    scrollToBottom()
+  } catch {
+    // 历史加载失败则空会话
+  }
+}
+
+async function switchSession(sid: string): Promise<void> {
+  if (loading.value) stop()
+  chatStore.setSession(sid)
+  showHistory.value = false
+  await loadHistory()
+}
+
+async function removeSession(sid: string): Promise<void> {
+  try {
+    await ElMessageBox.confirm('确定删除该历史对话吗？', '删除会话', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  try {
+    await deleteSession(sid)
+    sessions.value = sessions.value.filter((s) => s.session_id !== sid)
+    if (chatStore.sessionId === sid) {
+      chatStore.clearSession()
+      messages.value = []
+    }
+    ElMessage.success('会话已删除')
+  } catch {
+    ElMessage.error('删除失败')
+  }
 }
 
 async function sendByStream(text: string): Promise<'ok' | 'aborted' | 'failed'> {
@@ -176,6 +244,8 @@ async function send(): Promise<void> {
   }
   finishAssistant()
   track('chat_reply', { status, durationMs: Date.now() - startedAt })
+  // 新会话产生后刷新历史列表
+  loadSessionList()
 }
 
 function stop(): void {
@@ -194,6 +264,14 @@ function onEnter(): void {
   send()
 }
 
+// 页面挂载：恢复当前会话历史 + 加载历史会话列表
+onMounted(async () => {
+  loadSessionList()
+  if (chatStore.sessionId) {
+    await loadHistory()
+  }
+})
+
 // keep-alive 激活：从其他标签页返回时滚动到底部，保持聊天视图
 onActivated(() => {
   scrollToBottom()
@@ -209,12 +287,44 @@ onActivated(() => {
             <el-icon class="title-icon"><ChatDotRound /></el-icon>
             <span>食堂菜品推荐与营养分析 Agent</span>
           </div>
-          <el-button size="small" @click="startNewSession">
-            <el-icon style="margin-right: 4px"><Plus /></el-icon>
-            新会话
-          </el-button>
+          <div class="chat-header-actions">
+            <el-button size="small" @click="showHistory = !showHistory; if (showHistory) loadSessionList()">
+              历史对话
+            </el-button>
+            <el-button size="small" @click="startNewSession">
+              <el-icon style="margin-right: 4px"><Plus /></el-icon>
+              新会话
+            </el-button>
+          </div>
         </div>
       </template>
+
+      <!-- 历史会话列表（v1.3） -->
+      <div v-if="showHistory" class="chat-history-panel">
+        <div v-if="historyLoading" class="history-tip">加载中…</div>
+        <template v-else-if="sessions.length">
+          <div
+            v-for="s in sessions"
+            :key="s.session_id"
+            class="history-item"
+            :class="{ active: s.session_id === chatStore.sessionId }"
+            @click="switchSession(s.session_id)"
+          >
+            <div class="history-item-main">
+              <div class="history-title">{{ s.title || '未命名会话' }}</div>
+              <div class="history-time">{{ fmtSessionTime(s.updated_at) }}</div>
+            </div>
+            <el-button
+              size="small"
+              text
+              type="danger"
+              :icon="Delete"
+              @click.stop="removeSession(s.session_id)"
+            />
+          </div>
+        </template>
+        <el-empty v-else description="暂无历史对话" :image-size="60" />
+      </div>
 
       <div ref="listRef" class="chat-list">
         <!-- 欢迎引导卡（B8） -->
@@ -322,6 +432,67 @@ onActivated(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.chat-header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* 历史会话列表（v1.3） */
+.chat-history-panel {
+  border-bottom: 1px solid #e4e7ed;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 8px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.history-tip {
+  color: #909399;
+  font-size: 13px;
+  padding: 8px;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s;
+}
+
+.history-item:hover {
+  background: var(--el-color-primary-light-9);
+}
+
+.history-item.active {
+  background: var(--el-color-primary-light-8);
+  border-color: var(--el-color-primary-light-6);
+}
+
+.history-item-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.history-title {
+  font-size: 13px;
+  color: #303133;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-time {
+  font-size: 11px;
+  color: #c0c4cc;
+  margin-top: 2px;
 }
 
 .chat-title {

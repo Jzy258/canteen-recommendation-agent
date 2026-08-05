@@ -176,6 +176,33 @@ class DatabaseInterface(ABC):
     def set_user_status(self, user_id: int, status: int) -> bool:
         ...
 
+    # ---- v1.3 chat（历史对话） ----
+
+    @abstractmethod
+    def _ensure_chat_session(self, session_id: str,
+                             user_id: Optional[int] = None,
+                             title: str = "") -> int:
+        ...
+
+    @abstractmethod
+    def add_chat_message(self, session_id: str, role: str, content: str,
+                         user_id: Optional[int] = None) -> int:
+        ...
+
+    @abstractmethod
+    def get_chat_messages(self, session_id: str) -> list[dict]:
+        ...
+
+    @abstractmethod
+    def list_chat_sessions(self, user_id: Optional[int] = None,
+                           limit: int = 50) -> list[dict]:
+        ...
+
+    @abstractmethod
+    def delete_chat_session(self, session_id: str,
+                            user_id: Optional[int] = None) -> bool:
+        ...
+
 
 # =============================================================================
 # SQLite 实现
@@ -190,8 +217,7 @@ class SQLiteDatabase(DatabaseInterface):
     def _ensure_schema(self):
         """自动初始化：确保库结构完整且幂等。
         - 老库（无 dish 表）→ 执行完整 schema
-        - 部分表已存在的旧库 → 先做 v1.1 迁移（加 user_id 列），再补建缺失对象，
-          避免 CREATE INDEX ON user_id 在旧列缺失时报错
+        - 部分表已存在的旧库 → 先做增量迁移（v1.1/v1.2/v1.3），再补建缺失对象
         - 新库 → 直接执行 schema"""
         try:
             conn = sqlite3.connect(self.db_path)
@@ -207,9 +233,13 @@ class SQLiteDatabase(DatabaseInterface):
                     # 老库部分表存在时先迁移列（同连接内提交，新连接才能看到新列）
                     if has_meal is not None:
                         self._migrate_v11(conn)
+                        self._migrate_v12(conn)
+                        self._migrate_v13(conn)
                     self.init_db()
                 else:
                     self._migrate_v11(conn)
+                    self._migrate_v12(conn)
+                    self._migrate_v13(conn)
             finally:
                 conn.close()
         except sqlite3.Error:
@@ -248,6 +278,64 @@ class SQLiteDatabase(DatabaseInterface):
                     conn.execute(
                         f"ALTER TABLE {table} ADD COLUMN {column} INTEGER")
             # 立即提交迁移，避免后续 init_db() 的新连接看不到新列
+            conn.commit()
+        except sqlite3.Error:
+            pass
+
+    def _migrate_v12(self, conn):
+        """v1.1 → v1.2 增量迁移（克重调控）：
+        - dish 增加 serving_grams 列（标准份量克数）
+        - meal_record 增加 grams 列（实际摄入克重）
+        - 重建聚合视图（旧视图定义的 portion 系数需升级为克重换算）
+        幂等：检查列/视图存在性。"""
+        try:
+            # 1) 列
+            for table, column in (("dish", "serving_grams"),
+                                  ("meal_record", "grams")):
+                cols = {r["name"] for r in conn.execute(
+                    f"PRAGMA table_info({table})").fetchall()}
+                if column not in cols:
+                    conn.execute(
+                        f"ALTER TABLE {table} ADD COLUMN {column} REAL")
+            # 2) 重建聚合视图（schema.sql 已定义克重换算版，仅重建涉及克重的 4 个）
+            views_to_rebuild = ("v_daily_nutrition", "v_day_total",
+                                "v_weekly_nutrition", "v_week_summary")
+            for view in views_to_rebuild:
+                conn.execute(f"DROP VIEW IF EXISTS {view}")
+            schema = open(SCHEMA_PATH, "r", encoding="utf-8").read()
+            for stmt in schema.split(";"):
+                stmt = stmt.strip()
+                if not stmt:
+                    continue
+                upper = stmt.upper()
+                if "CREATE VIEW" in upper:
+                    create_line = next(
+                        (ln for ln in stmt.splitlines() if "CREATE VIEW" in ln.upper()),
+                        "")
+                    if any(v in create_line for v in views_to_rebuild):
+                        conn.executescript(stmt + ";")
+            conn.commit()
+        except sqlite3.Error:
+            pass
+
+    def _migrate_v13(self, conn):
+        """v1.2 → v1.3 增量迁移（历史对话）：
+        - 创建 chat_session / chat_message 表
+        幂等：先检查表是否已存在。"""
+        try:
+            for tbl in ("chat_session", "chat_message"):
+                exists = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                    (tbl,)).fetchone()
+                if exists is None:
+                    schema = open(SCHEMA_PATH, "r", encoding="utf-8").read()
+                    for stmt in schema.split(";"):
+                        stmt = stmt.strip()
+                        if not stmt:
+                            continue
+                        upper = stmt.upper()
+                        if f"CREATE TABLE IF NOT EXISTS {tbl.upper()}" in upper:
+                            conn.executescript(stmt + ";")
             conn.commit()
         except sqlite3.Error:
             pass
@@ -450,12 +538,20 @@ class SQLiteDatabase(DatabaseInterface):
 
     def add_meal_record(self, date: str, meal_time: str, dish_id: int,
                         portion: float = 1.0,
-                        user_id: Optional[int] = None) -> int:
-        sql = """INSERT INTO meal_record (date, meal_time, dish_id, portion, user_id)
-                 VALUES (?, ?, ?, ?, ?)"""
+                        user_id: Optional[int] = None,
+                        grams: Optional[float] = None) -> int:
+        sql = """INSERT INTO meal_record (date, meal_time, dish_id, portion, user_id, grams)
+                 VALUES (?, ?, ?, ?, ?, ?)"""
         with self._connect() as conn:
-            cur = conn.execute(sql, (date, meal_time, dish_id, portion, user_id))
+            cur = conn.execute(sql, (date, meal_time, dish_id, portion, user_id, grams))
             return cur.lastrowid
+
+    @staticmethod
+    def _serving_factor_sql():
+        """克重换算系数 SQL 片段：grams 有值且 serving_grams>0 时按克重折算，
+        否则回退份数 portion。"""
+        return ("(CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0 "
+                "THEN mr.grams / d.serving_grams ELSE mr.portion END)")
 
     def confirm_meal_record(self, record_id: int) -> bool:
         with self._connect() as conn:
@@ -549,15 +645,16 @@ class SQLiteDatabase(DatabaseInterface):
         汇总内容：总摄入、日均营养、按餐次平均、菜品多样性、近7天趋势。
         与 B 的 store.summarize_nutrition 协调：仅更新本模块的统计键，
         保留既有 summary 中的其他键（如 B 写入的 days/week_key），避免互相覆盖。"""
+        f = self._serving_factor_sql()
         with self._connect() as conn:
-            sql = """SELECT
+            sql = f"""SELECT
                        COUNT(*) AS record_count,
                        COUNT(DISTINCT date) AS day_count,
                        COUNT(DISTINCT d.id) AS dish_kind_count,
-                       ROUND(SUM(d.calories * mr.portion), 1) AS total_calories,
-                       ROUND(SUM(d.protein * mr.portion), 1) AS total_protein,
-                       ROUND(SUM(d.carbs * mr.portion), 1) AS total_carbs,
-                       ROUND(SUM(d.fat * mr.portion), 1) AS total_fat
+                       ROUND(SUM(d.calories * {f}), 1) AS total_calories,
+                       ROUND(SUM(d.protein * {f}), 1) AS total_protein,
+                       ROUND(SUM(d.carbs * {f}), 1) AS total_carbs,
+                       ROUND(SUM(d.fat * {f}), 1) AS total_fat
                    FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
                    WHERE mr.confirmed = 1"""
             params: list = []
@@ -605,9 +702,10 @@ class SQLiteDatabase(DatabaseInterface):
 
     def _meal_averages(self, user_id: Optional[int] = None) -> dict:
         """按餐次统计平均摄入。"""
+        f = self._serving_factor_sql()
         with self._connect() as conn:
-            sql = """SELECT mr.meal_time,
-                          ROUND(SUM(d.calories * mr.portion) / COUNT(DISTINCT mr.date), 1) AS avg_calories
+            sql = f"""SELECT mr.meal_time,
+                          ROUND(SUM(d.calories * {f}) / COUNT(DISTINCT mr.date), 1) AS avg_calories
                    FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
                    WHERE mr.confirmed = 1"""
             params: list = []
@@ -621,9 +719,10 @@ class SQLiteDatabase(DatabaseInterface):
     def _recent_trend(self, days: int = 7,
                       user_id: Optional[int] = None) -> list[dict]:
         """最近 N 天每日热量摄入（仅含实际有记录的天）。"""
+        f = self._serving_factor_sql()
         with self._connect() as conn:
-            sql = """SELECT mr.date,
-                          ROUND(SUM(d.calories * mr.portion), 1) AS calories
+            sql = f"""SELECT mr.date,
+                          ROUND(SUM(d.calories * {f}), 1) AS calories
                    FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
                    WHERE mr.confirmed = 1"""
             params: list = []
@@ -637,9 +736,15 @@ class SQLiteDatabase(DatabaseInterface):
 
     def get_records_by_date(self, date: str,
                             user_id: Optional[int] = None) -> list[dict]:
-        sql = """SELECT mr.*, d.name AS dish_name, d.calories, d.protein, d.carbs, d.fat
-                 FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
-                 WHERE mr.date = ? AND mr.confirmed = 1"""
+        f = self._serving_factor_sql()
+        sql = f"""SELECT mr.*, d.name AS dish_name, d.calories, d.protein, d.carbs, d.fat,
+                         d.serving_grams,
+                         ROUND(d.calories * {f}, 1) AS intake_calories,
+                         ROUND(d.protein * {f}, 1) AS intake_protein,
+                         ROUND(d.carbs * {f}, 1) AS intake_carbs,
+                         ROUND(d.fat * {f}, 1) AS intake_fat
+                  FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
+                  WHERE mr.date = ? AND mr.confirmed = 1"""
         params: list = [date]
         if user_id is not None:
             sql += " AND mr.user_id = ?"
@@ -652,9 +757,16 @@ class SQLiteDatabase(DatabaseInterface):
     def get_records_in_range(self, start_date: str, end_date: str,
                              meal_time: str = "",
                              user_id: Optional[int] = None) -> list[dict]:
-        """返回 [start_date, end_date] 内已确认的饮食记录，可按餐次过滤。"""
-        sql = ("""SELECT mr.*, d.name AS dish_name, d.calories, d.protein,
-                          d.carbs, d.fat, d.price, d.category
+        """返回 [start_date, end_date] 内已确认的饮食记录，可按餐次过滤。
+        含实际摄入营养（intake_*，按 grams/serving_grams 或 portion 折算）。"""
+        f = self._serving_factor_sql()
+        sql = (f"""SELECT mr.*, d.name AS dish_name, d.calories, d.protein,
+                          d.carbs, d.fat, d.price, d.category,
+                          d.serving_grams,
+                          ROUND(d.calories * {f}, 1) AS intake_calories,
+                          ROUND(d.protein * {f}, 1) AS intake_protein,
+                          ROUND(d.carbs * {f}, 1) AS intake_carbs,
+                          ROUND(d.fat * {f}, 1) AS intake_fat
                    FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
                    WHERE mr.confirmed = 1 AND mr.date BETWEEN ? AND ?""")
         params: list = [start_date, end_date]
@@ -679,10 +791,10 @@ class SQLiteDatabase(DatabaseInterface):
             else:
                 rows = conn.execute(
                     """SELECT mr.meal_time,
-                              SUM(d.calories * mr.portion) AS total_calories,
-                              SUM(d.protein * mr.portion) AS total_protein,
-                              SUM(d.carbs * mr.portion) AS total_carbs,
-                              SUM(d.fat * mr.portion) AS total_fat,
+                              SUM(d.calories * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0 THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_calories,
+                              SUM(d.protein * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0 THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_protein,
+                              SUM(d.carbs * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0 THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_carbs,
+                              SUM(d.fat * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0 THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_fat,
                               COUNT(DISTINCT mr.id) AS dish_count
                        FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
                        WHERE mr.confirmed = 1 AND mr.date = ? AND mr.user_id = ?
@@ -700,10 +812,10 @@ class SQLiteDatabase(DatabaseInterface):
             else:
                 row = conn.execute(
                     """SELECT mr.date,
-                              SUM(d.calories * mr.portion) AS total_calories,
-                              SUM(d.protein * mr.portion) AS total_protein,
-                              SUM(d.carbs * mr.portion) AS total_carbs,
-                              SUM(d.fat * mr.portion) AS total_fat,
+                              SUM(d.calories * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0 THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_calories,
+                              SUM(d.protein * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0 THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_protein,
+                              SUM(d.carbs * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0 THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_carbs,
+                              SUM(d.fat * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0 THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_fat,
                               COUNT(DISTINCT mr.id) AS dish_count
                        FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
                        WHERE mr.confirmed = 1 AND mr.date = ? AND mr.user_id = ?
@@ -721,10 +833,10 @@ class SQLiteDatabase(DatabaseInterface):
             else:
                 rows = conn.execute(
                     """SELECT strftime('%Y-%W', mr.date) AS week_key, mr.date,
-                              SUM(d.calories * mr.portion) AS total_calories,
-                              SUM(d.protein * mr.portion) AS total_protein,
-                              SUM(d.carbs * mr.portion) AS total_carbs,
-                              SUM(d.fat * mr.portion) AS total_fat
+                              SUM(d.calories * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0 THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_calories,
+                              SUM(d.protein * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0 THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_protein,
+                              SUM(d.carbs * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0 THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_carbs,
+                              SUM(d.fat * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0 THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_fat
                        FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
                        WHERE mr.confirmed = 1 AND mr.date BETWEEN ? AND ? AND mr.user_id = ?
                        GROUP BY mr.date ORDER BY mr.date""",
@@ -743,10 +855,10 @@ class SQLiteDatabase(DatabaseInterface):
                     """SELECT strftime('%Y-%W', mr.date) AS week_key,
                               MIN(mr.date) AS start_date,
                               MAX(mr.date) AS end_date,
-                              SUM(d.calories * mr.portion) AS total_calories,
-                              SUM(d.protein * mr.portion) AS total_protein,
-                              SUM(d.carbs * mr.portion) AS total_carbs,
-                              SUM(d.fat * mr.portion) AS total_fat,
+                              SUM(d.calories * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0 THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_calories,
+                              SUM(d.protein * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0 THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_protein,
+                              SUM(d.carbs * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0 THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_carbs,
+                              SUM(d.fat * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0 THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_fat,
                               COUNT(DISTINCT mr.date) AS day_count,
                               COUNT(DISTINCT mr.id) AS dish_count
                        FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
@@ -799,10 +911,10 @@ class SQLiteDatabase(DatabaseInterface):
             else:
                 rows = conn.execute(
                     """SELECT mr.date,
-                              SUM(d.calories * mr.portion) AS total_calories,
-                              SUM(d.protein * mr.portion) AS total_protein,
-                              SUM(d.carbs * mr.portion) AS total_carbs,
-                              SUM(d.fat * mr.portion) AS total_fat,
+                              SUM(d.calories * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0 THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_calories,
+                              SUM(d.protein * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0 THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_protein,
+                              SUM(d.carbs * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0 THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_carbs,
+                              SUM(d.fat * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0 THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_fat,
                               COUNT(DISTINCT mr.id) AS dish_count
                        FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
                        WHERE mr.confirmed = 1 AND mr.date BETWEEN ? AND ? AND mr.user_id = ?
@@ -999,6 +1111,77 @@ class SQLiteDatabase(DatabaseInterface):
                 if row.get("weather_type") == weather_type and row.get("keyword"):
                     tags.append((row["match_field"], row["keyword"]))
         return tags
+
+    # ---- v1.3 chat（历史对话） ----
+
+    def _ensure_chat_session(self, session_id: str,
+                             user_id: Optional[int] = None,
+                             title: str = "") -> int:
+        """确保会话记录存在，返回 chat_session.id。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT id FROM chat_session WHERE session_id = ?",
+                (session_id,)).fetchone()
+            if row:
+                now = "datetime('now','localtime')"
+                conn.execute(
+                    f"UPDATE chat_session SET updated_at = {now} WHERE id = ?",
+                    (row["id"],))
+                return row["id"]
+            cur = conn.execute(
+                "INSERT INTO chat_session (session_id, title, user_id) VALUES (?, ?, ?)",
+                (session_id, title[:50], user_id))
+            return cur.lastrowid
+
+    def add_chat_message(self, session_id: str, role: str, content: str,
+                         user_id: Optional[int] = None) -> int:
+        """追加一条对话消息。role: user / assistant。"""
+        self._ensure_chat_session(session_id, user_id=user_id)
+        with self._connect() as conn:
+            cur = conn.execute(
+                "INSERT INTO chat_message (session_id, role, content) VALUES (?, ?, ?)",
+                (session_id, role, content))
+            return cur.lastrowid
+
+    def get_chat_messages(self, session_id: str) -> list[dict]:
+        """按时间顺序返回会话全部消息。"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT role, content, created_at FROM chat_message "
+                "WHERE session_id = ? ORDER BY id",
+                (session_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def list_chat_sessions(self, user_id: Optional[int] = None,
+                           limit: int = 50) -> list[dict]:
+        """列出历史会话（按更新时间倒序）。user_id=None 时返回全部（游客/历史）。"""
+        with self._connect() as conn:
+            if user_id is None:
+                rows = conn.execute(
+                    "SELECT session_id, title, created_at, updated_at "
+                    "FROM chat_session ORDER BY updated_at DESC LIMIT ?",
+                    (limit,)).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT session_id, title, created_at, updated_at "
+                    "FROM chat_session WHERE user_id = ? "
+                    "ORDER BY updated_at DESC LIMIT ?",
+                    (user_id, limit)).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_chat_session(self, session_id: str,
+                            user_id: Optional[int] = None) -> bool:
+        """删除会话（含消息）。user_id 用于越权校验；None 时任意删。"""
+        with self._connect() as conn:
+            if user_id is None:
+                cur = conn.execute(
+                    "DELETE FROM chat_session WHERE session_id = ?",
+                    (session_id,))
+            else:
+                cur = conn.execute(
+                    "DELETE FROM chat_session WHERE session_id = ? AND user_id = ?",
+                    (session_id, user_id))
+            return cur.rowcount > 0
 
 
 # =============================================================================

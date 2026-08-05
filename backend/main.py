@@ -169,11 +169,12 @@ def update_profile(req: ProfileUpdateRequest,
 
 
 @app.post("/chat", response_model=ChatResponse)
-def chat(req: ChatRequest):
+def chat(req: ChatRequest, user: dict | None = Depends(get_optional_user)):
     if not req.message or not req.message.strip():
         logger.warning("空消息被拒绝")
         raise HTTPException(status_code=400, detail="消息不能为空")
 
+    uid = user["id"] if user else None
     session_id = req.session_id or str(uuid.uuid4())
     history = session_store.get(session_id)
     logger.info("chat 请求 | session=%s | msg=%s", session_id, req.message[:200])
@@ -194,13 +195,13 @@ def chat(req: ChatRequest):
                          session_id, req.message[:200], e)
         reply = "抱歉，系统处理出错，请稍后再试或换一种问法。"
 
-    # persist to memory (trim old turns)
-    session_store.append(session_id, req.message, reply)
+    # persist to db (历史持久化)
+    session_store.append(session_id, req.message, reply, user_id=uid)
 
     return ChatResponse(reply=reply, session_id=session_id)
 
 
-def _stream_reply(session_id: str, message: str):
+def _stream_reply(session_id: str, message: str, user_id: int | None = None):
     """真实流式输出：通过 agent.astream_events 逐 token 推送 LLM 生成内容。"""
     history = session_store.get(session_id)
     logger.info("chat/stream 请求 | session=%s | msg=%s", session_id, message[:200])
@@ -291,7 +292,7 @@ def _stream_reply(session_id: str, message: str):
 
         # Token 统计 + 会话持久化（流式结束时统一处理）
         add_tokens(count_tokens(message) + count_tokens(reply))
-        session_store.append(session_id, message, reply)
+        session_store.append(session_id, message, reply, user_id=user_id)
         logger.info("chat/stream 完成 | session=%s | reply_len=%s", session_id, len(reply))
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
@@ -303,12 +304,46 @@ def _stream_reply(session_id: str, message: str):
 
 
 @app.post("/chat/stream")
-def chat_stream(req: ChatRequest):
+def chat_stream(req: ChatRequest, user: dict | None = Depends(get_optional_user)):
     """流式对话：SSE 输出，先 session 元数据，再 content 增量，最后 done。"""
     if not req.message or not req.message.strip():
         raise HTTPException(status_code=400, detail="消息不能为空")
     session_id = req.session_id or str(uuid.uuid4())
-    return _stream_reply(session_id, req.message)
+    uid = user["id"] if user else None
+    return _stream_reply(session_id, req.message, user_id=uid)
+
+
+# =============================================================================
+# 历史对话（v1.3）
+# =============================================================================
+
+@app.get("/sessions")
+def list_sessions(user: dict | None = Depends(get_optional_user),
+                  limit: int = 50):
+    """历史会话列表（按更新时间倒序）。登录用户返回本人会话；游客返回全部。"""
+    from db import get_db
+    uid = user["id"] if user else None
+    return get_db().list_chat_sessions(user_id=uid, limit=min(limit, 200))
+
+
+@app.get("/sessions/{session_id}/messages")
+def get_session_messages(session_id: str,
+                         user: dict | None = Depends(get_optional_user)):
+    """某会话的完整消息历史（供前端恢复对话）。"""
+    from db import get_db
+    return get_db().get_chat_messages(session_id)
+
+
+@app.delete("/sessions/{session_id}")
+def delete_session(session_id: str,
+                   user: dict | None = Depends(get_optional_user)):
+    """删除历史会话（登录用户仅能删自己的；游客删任意）。"""
+    from db import get_db
+    uid = user["id"] if user else None
+    ok = get_db().delete_chat_session(session_id, user_id=uid)
+    if not ok:
+        raise HTTPException(status_code=404, detail="会话不存在或无权删除")
+    return {"ok": True}
 
 
 if __name__ == "__main__":

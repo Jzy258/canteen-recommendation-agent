@@ -1,9 +1,38 @@
 import { http } from './client'
 import type { ChatRequest, ChatResponse, StreamEvent } from '@/types/chat'
 
+export interface ChatSessionItem {
+  session_id: string
+  title: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ChatHistoryMessage {
+  role: 'user' | 'assistant'
+  content: string
+  created_at: string
+}
+
 export async function chat(req: ChatRequest): Promise<ChatResponse> {
   const { data } = await http.post<ChatResponse>('/chat', req)
   return data
+}
+
+export async function listSessions(limit = 50): Promise<ChatSessionItem[]> {
+  const { data } = await http.get<ChatSessionItem[]>('/sessions', {
+    params: { limit },
+  })
+  return data
+}
+
+export async function getSessionMessages(sessionId: string): Promise<ChatHistoryMessage[]> {
+  const { data } = await http.get<ChatHistoryMessage[]>(`/sessions/${sessionId}/messages`)
+  return data
+}
+
+export async function deleteSession(sessionId: string): Promise<void> {
+  await http.delete(`/sessions/${sessionId}`)
 }
 
 export async function chatStream(
