@@ -1,0 +1,163 @@
+"""
+A · D10 历史对话 + 饮食记录 CRUD 交付物验证
+覆盖：chat 表 / SessionStore 持久化 / 历史接口 / 记录增删改查
+"""
+import os
+import sys
+import tempfile
+import sqlite3
+
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+sys.path.insert(0, os.path.join(_PROJECT_ROOT, "backend"))
+sys.path.insert(0, os.path.join(_PROJECT_ROOT, "backend", "db"))
+
+passes = 0
+fails = 0
+
+def check(name, cond, detail=""):
+    global passes, fails
+    if cond:
+        passes += 1
+        print(f"  [PASS] {name}")
+    else:
+        fails += 1
+        print(f"  [FAIL] {name} {detail}")
+
+print("=" * 55)
+print("交付物 1: schema.sql v1.3（chat 表）")
+print("=" * 55)
+schema = open(os.path.join(_PROJECT_ROOT, "backend", "db", "schema.sql"),
+              encoding="utf-8").read()
+check("schema 版本 v1.3", "v1.3" in schema)
+check("含 chat_session 表", "CREATE TABLE IF NOT EXISTS chat_session" in schema)
+check("含 chat_message 表", "CREATE TABLE IF NOT EXISTS chat_message" in schema)
+check("chat_message 外键级联", "REFERENCES chat_session(session_id) ON DELETE CASCADE" in schema)
+
+print("=" * 55)
+print("交付物 2: db.py 历史对话接口")
+print("=" * 55)
+db_code = open(os.path.join(_PROJECT_ROOT, "backend", "db", "db.py"),
+               encoding="utf-8").read()
+for m in ["_migrate_v13", "add_chat_message", "get_chat_messages",
+          "list_chat_sessions", "delete_chat_session"]:
+    check(f"db.py 含 {m}", f"def {m}" in db_code)
+
+from db import SQLiteDatabase, DatabaseInterface
+impl = {m for m in dir(SQLiteDatabase) if not m.startswith("_")}
+abstr = {m for m in dir(DatabaseInterface) if not m.startswith("_")}
+check("接口抽象与实现一致", abstr.issubset(impl))
+
+print("=" * 55)
+print("交付物 3: 历史消息写入与读取")
+print("=" * 55)
+tmp_db = os.path.join(tempfile.gettempdir(), "test_d10.db")
+if os.path.exists(tmp_db):
+    os.remove(tmp_db)
+db = SQLiteDatabase(tmp_db)
+db.add_chat_message("sess-1", "user", "今天吃什么？")
+db.add_chat_message("sess-1", "assistant", "推荐红烧肉和米饭")
+msgs = db.get_chat_messages("sess-1")
+check("写入两条消息", len(msgs) == 2)
+check("顺序正确（user 在前）", msgs[0]["role"] == "user" and msgs[1]["role"] == "assistant")
+check("内容保留", msgs[1]["content"] == "推荐红烧肉和米饭")
+
+print("=" * 55)
+print("交付物 4: SessionStore SQLite 持久化")
+print("=" * 55)
+import db as dbmod
+from agent.session import SessionStore
+_db_tmp = SQLiteDatabase(tmp_db)
+dbmod._db_instance = _db_tmp
+store = SessionStore()
+store.append("sess-persist", "你好", "你好！有什么可以帮你？")
+store2 = SessionStore()
+hist = store2.get("sess-persist")
+check("新实例可恢复历史", len(hist) == 2)
+check("消息内容正确", hist[0].content == "你好" and hist[1].content == "你好！有什么可以帮你？")
+rows = db.get_chat_messages("sess-persist")
+check("消息已入库", len(rows) == 2)
+
+print("=" * 55)
+print("交付物 5: 会话列表 / 删除")
+print("=" * 55)
+db.add_chat_message("sess-a", "user", "第一条会话")
+sessions = db.list_chat_sessions(user_id=None)
+check("列表包含会话", any(s["session_id"] == "sess-a" for s in sessions))
+check("列表按更新时间倒序", sessions[0]["updated_at"] >= sessions[-1]["updated_at"])
+db.delete_chat_session("sess-a")
+check("删除后消息级联清除", db.get_chat_messages("sess-a") == [])
+
+print("=" * 55)
+print("交付物 6: v1.3 迁移幂等")
+print("=" * 55)
+old_db = os.path.join(tempfile.gettempdir(), "test_d10_old.db")
+if os.path.exists(old_db):
+    os.remove(old_db)
+con = sqlite3.connect(old_db)
+con.executescript("""
+    CREATE TABLE dish (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE,
+        calories REAL NOT NULL, protein REAL NOT NULL, carbs REAL NOT NULL, fat REAL NOT NULL,
+        price REAL NOT NULL, category TEXT NOT NULL, flavor_tags TEXT DEFAULT '',
+        serving_grams REAL DEFAULT 150, source TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')));
+""")
+con.commit()
+con.close()
+db_old = SQLiteDatabase(old_db)
+con = sqlite3.connect(old_db)
+chat_tables = [r[0] for r in con.execute(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'chat_%'")]
+check("老库迁移建 chat 表", sorted(chat_tables) == ["chat_message", "chat_session"])
+con.close()
+db_old2 = SQLiteDatabase(old_db)
+con2 = sqlite3.connect(old_db)
+check("重复迁移幂等", len(con2.execute(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='chat_session'").fetchall()) == 1)
+con2.close()
+
+print("=" * 55)
+print("交付物 7: main.py 历史接口注册")
+print("=" * 55)
+main_code = open(os.path.join(_PROJECT_ROOT, "backend", "main.py"),
+                 encoding="utf-8").read()
+for route in ["/sessions", "get_session_messages", "delete_session", "list_sessions"]:
+    check(f"main.py 含 {route}", route in main_code)
+
+print("=" * 55)
+print("交付物 8: 饮食记录 CRUD（增删改查）")
+print("=" * 55)
+db.bulk_insert_dishes([
+    {"name": "红烧肉", "calories": 500, "protein": 20, "carbs": 10, "fat": 35,
+     "price": 12, "category": "荤菜", "flavor_tags": "咸", "source": "t",
+     "serving_grams": 150},
+    {"name": "米饭", "calories": 200, "protein": 4, "carbs": 45, "fat": 0.5,
+     "price": 1, "category": "主食", "flavor_tags": "", "source": "t",
+     "serving_grams": 175},
+])
+# 增
+rid = db.add_meal_record("2026-08-06", "lunch", 1, portion=1.0, grams=100)
+rec = db.get_meal_record(rid)
+check("新增记录可查", rec is not None and rec["dish_name"] == "红烧肉")
+# 改
+ok = db.update_meal_record(rid, portion=2.0, grams=150)
+rec2 = db.get_meal_record(rid)
+check("修改份量/克重", ok and rec2["portion"] == 2.0 and rec2["grams"] == 150)
+ok = db.update_meal_record(rid, dish_id=2)
+check("修改菜品", ok and db.get_meal_record(rid)["dish_name"] == "米饭")
+# 越权拒绝
+u = db.create_user("bob", "h", role="user")
+check("越权修改被拒绝", not db.update_meal_record(rid, portion=3.0, user_id=u))
+# 删
+check("删除记录", db.delete_meal_record(rid) and db.get_meal_record(rid) is None)
+check("重复删除返回 False", not db.delete_meal_record(rid))
+# main.py CRUD 接口
+for route in ["@app.put(\"/records/{record_id}\")",
+              "@app.delete(\"/records/{record_id}\")",
+              "update_meal_record", "delete_meal_record"]:
+    check(f"main.py 含 {route[:40]}", route in main_code)
+
+print("=" * 55)
+print(f"结果: {passes} passed, {fails} failed")
+print("=" * 55)
+if fails:
+    sys.exit(1)

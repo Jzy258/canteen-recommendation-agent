@@ -33,6 +33,19 @@ function categoryEmoji(category?: string): string {
   return (category && CATEGORY_EMOJI[category]) || '🍽️'
 }
 
+// 每份推荐克重（g）：仅前端展示文本，按类别映射，不新增字段/不进后端
+const RECOMMEND_WEIGHT: Record<string, number> = {
+  荤菜: 180,
+  素菜: 200,
+  主食: 150,
+  汤: 300,
+  水果: 150,
+  饮品: 250,
+}
+function recommendWeight(category?: string): number {
+  return (category && RECOMMEND_WEIGHT[category]) || 180
+}
+
 // 根据营养数据前端计算营养标签（建议1）
 function nutritionTags(): string[] {
   const d = props.dish
@@ -67,15 +80,15 @@ function handleDishClick(e: MouseEvent): void {
     <div class="dish-head">
       <span class="dish-name">
         <span class="dish-emoji">{{ categoryEmoji(dish.category) }}</span>
-        {{ dish.name }}
+        {{ dish.name }}<span class="dish-weight">(推荐{{ recommendWeight(dish.category) }}g)</span>
       </span>
       <span class="dish-price">¥{{ dish.price }}</span>
     </div>
     <div class="dish-nutrition">
       <span class="nut"><b>{{ fmt(dish.calories) }}</b> kcal</span>
-      <span class="nut"><b>{{ fmt(dish.protein) }}</b> 蛋白</span>
-      <span class="nut"><b>{{ fmt(dish.carbs) }}</b> 碳水</span>
-      <span class="nut"><b>{{ fmt(dish.fat) }}</b> 脂肪</span>
+      <span class="nut"><b>{{ fmt(dish.protein) }}g</b> 蛋白</span>
+      <span class="nut"><b>{{ fmt(dish.carbs) }}g</b> 碳水</span>
+      <span class="nut"><b>{{ fmt(dish.fat) }}g</b> 脂肪</span>
     </div>
     <div v-if="nutritionTags().length" class="dish-tags">
       <span v-for="tag in nutritionTags()" :key="tag" class="dish-tag">{{ tag }}</span>

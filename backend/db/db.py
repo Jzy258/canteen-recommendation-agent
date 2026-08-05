@@ -84,6 +84,24 @@ class DatabaseInterface(ABC):
         ...
 
     @abstractmethod
+    def update_meal_record(self, record_id: int, date: str | None = None,
+                           meal_time: str | None = None,
+                           dish_id: int | None = None,
+                           portion: float | None = None,
+                           grams: float | None = None,
+                           user_id: int | None = None) -> bool:
+        ...
+
+    @abstractmethod
+    def delete_meal_record(self, record_id: int,
+                           user_id: int | None = None) -> bool:
+        ...
+
+    @abstractmethod
+    def get_meal_record(self, record_id: int) -> Optional[dict]:
+        ...
+
+    @abstractmethod
     def get_pending_records(self) -> list[dict]:
         ...
 
@@ -189,6 +207,33 @@ class DatabaseInterface(ABC):
     def set_user_status(self, user_id: int, status: int) -> bool:
         ...
 
+    # ---- v1.3 chat（历史对话） ----
+
+    @abstractmethod
+    def _ensure_chat_session(self, session_id: str,
+                             user_id: Optional[int] = None,
+                             title: str = "") -> int:
+        ...
+
+    @abstractmethod
+    def add_chat_message(self, session_id: str, role: str, content: str,
+                         user_id: Optional[int] = None) -> int:
+        ...
+
+    @abstractmethod
+    def get_chat_messages(self, session_id: str) -> list[dict]:
+        ...
+
+    @abstractmethod
+    def list_chat_sessions(self, user_id: Optional[int] = None,
+                           limit: int = 50) -> list[dict]:
+        ...
+
+    @abstractmethod
+    def delete_chat_session(self, session_id: str,
+                            user_id: Optional[int] = None) -> bool:
+        ...
+
 
 # =============================================================================
 # SQLite 实现
@@ -220,10 +265,14 @@ class SQLiteDatabase(DatabaseInterface):
                     if has_meal is not None:
                         self._migrate_v11(conn)
                         self._migrate_v12(conn)
+                        self._migrate_v13(conn)
+                        self._migrate_v14(conn)
                     self.init_db()
                     return
                 self._migrate_v11(conn)
                 self._migrate_v12(conn)
+                self._migrate_v13(conn)
+                self._migrate_v14(conn)
             finally:
                 conn.close()
         except sqlite3.Error:
@@ -282,10 +331,14 @@ class SQLiteDatabase(DatabaseInterface):
                     conn.execute(
                         f"ALTER TABLE {table} ADD COLUMN {column} REAL")
             # user_profile 增加预算下限列（v1.3 预算范围；budget 作为上限）
-            up_cols = {r["name"] for r in conn.execute(
-                "PRAGMA table_info(user_profile)").fetchall()}
-            if "budget_min" not in up_cols:
-                conn.execute("ALTER TABLE user_profile ADD COLUMN budget_min REAL")
+            up_exists = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='user_profile'"
+            ).fetchone()
+            if up_exists is not None:
+                up_cols = {r["name"] for r in conn.execute(
+                    "PRAGMA table_info(user_profile)").fetchall()}
+                if "budget_min" not in up_cols:
+                    conn.execute("ALTER TABLE user_profile ADD COLUMN budget_min REAL")
             # 2) 重建聚合视图（schema.sql 已定义克重换算版，仅重建涉及克重的 4 个）
             views_to_rebuild = ("v_daily_nutrition", "v_day_total",
                                 "v_weekly_nutrition", "v_week_summary")
@@ -303,6 +356,48 @@ class SQLiteDatabase(DatabaseInterface):
                         "")
                     if any(v in create_line for v in views_to_rebuild):
                         conn.executescript(stmt + ";")
+        except sqlite3.Error:
+            pass
+
+    def _migrate_v13(self, conn):
+        """v1.2 → v1.3 增量迁移（历史对话）：
+        - 创建 chat_session / chat_message 表
+        幂等：先检查表是否已存在。"""
+        try:
+            for tbl in ("chat_session", "chat_message"):
+                exists = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                    (tbl,)).fetchone()
+                if exists is None:
+                    schema = open(SCHEMA_PATH, "r", encoding="utf-8").read()
+                    for stmt in schema.split(";"):
+                        stmt = stmt.strip()
+                        if not stmt:
+                            continue
+                        upper = stmt.upper()
+                        if f"CREATE TABLE IF NOT EXISTS {tbl.upper()}" in upper:
+                            conn.executescript(stmt + ";")
+            conn.commit()
+        except sqlite3.Error:
+            pass
+
+    def _migrate_v14(self, conn):
+        """v1.3 → v1.4 增量迁移：food_record 增加 fat / carbs 列（饮食记录记录脂肪/碳水）。"""
+        try:
+            for column in ("fat", "carbs", "grams", "recommended_grams"):
+                cols = {r["name"] for r in conn.execute(
+                    "PRAGMA table_info(food_record)").fetchall()}
+                if column not in cols:
+                    conn.execute(
+                        f"ALTER TABLE food_record ADD COLUMN {column} REAL NOT NULL DEFAULT 0")
+            # 回填历史聊天记录：按菜名取 dish 的推荐克重（serving_grams）
+            conn.execute(
+                """UPDATE food_record
+                   SET recommended_grams = COALESCE(
+                       (SELECT serving_grams FROM dish WHERE dish.name = food_record.name), 0)
+                   WHERE remark = '（聊天记录）'
+                     AND (recommended_grams IS NULL OR recommended_grams = 0)""")
+            conn.commit()
         except sqlite3.Error:
             pass
 
@@ -547,6 +642,158 @@ class SQLiteDatabase(DatabaseInterface):
                 "UPDATE meal_record SET confirmed = -1 WHERE id = ? AND confirmed = 0",
                 (record_id,))
             return cur.rowcount > 0
+
+    def update_meal_record(self, record_id: int, date: str | None = None,
+                           meal_time: str | None = None,
+                           dish_id: int | None = None,
+                           portion: float | None = None,
+                           grams: float | None = None,
+                           user_id: int | None = None) -> bool:
+        """修改一条饮食记录。仅更新传入的非空字段。
+        user_id 用于越权校验：记录归属用户不匹配则拒绝（None 时跳过校验）。
+        修改已确认记录后刷新营养汇总。"""
+        with self._connect() as conn:
+            # 越权校验
+            row = conn.execute(
+                "SELECT * FROM meal_record WHERE id = ?", (record_id,)).fetchone()
+            if row is None:
+                return False
+            if user_id is not None and row["user_id"] != user_id:
+                return False
+            sets, params = [], []
+            if date is not None:
+                sets.append("date = ?"); params.append(date)
+            if meal_time is not None:
+                sets.append("meal_time = ?"); params.append(meal_time)
+            if dish_id is not None:
+                sets.append("dish_id = ?"); params.append(dish_id)
+            if portion is not None:
+                sets.append("portion = ?"); params.append(portion)
+            if grams is not None:
+                sets.append("grams = ?"); params.append(grams)
+            if not sets:
+                return True
+            params.append(record_id)
+            cur = conn.execute(
+                f"UPDATE meal_record SET {', '.join(sets)} WHERE id = ?",
+                params)
+            ok = cur.rowcount > 0
+            owner = row["user_id"]
+        if ok and row["confirmed"] == 1:
+            self._refresh_profile_summary(user_id=owner)
+        return ok
+
+    def delete_meal_record(self, record_id: int,
+                           user_id: int | None = None) -> bool:
+        """物理删除一条饮食记录。user_id 用于越权校验（None 时跳过）。"""
+        with self._connect() as conn:
+            if user_id is None:
+                cur = conn.execute(
+                    "DELETE FROM meal_record WHERE id = ?", (record_id,))
+            else:
+                cur = conn.execute(
+                    "DELETE FROM meal_record WHERE id = ? AND user_id = ?",
+                    (record_id, user_id))
+            return cur.rowcount > 0
+
+    # ---- food_record：手工饮食记录（CRUD）----
+
+    def get_food_records(self, start_date: str = "", end_date: str = "",
+                         meal_time: str = "", user_id: int | None = None) -> list[dict]:
+        """返回 [start_date, end_date] 内手工饮食记录，可按餐次过滤。"""
+        sql = "SELECT * FROM food_record WHERE 1=1"
+        params: list = []
+        if user_id is not None:
+            sql += " AND user_id = ?"; params.append(user_id)
+        if start_date:
+            sql += " AND date >= ?"; params.append(start_date)
+        if end_date:
+            sql += " AND date <= ?"; params.append(end_date)
+        if meal_time:
+            # 兼容中英文餐次（agent 聊天记录可能写入中文，如“早餐/其他”）
+            variants = {
+                "breakfast": ("breakfast", "早餐"),
+                "lunch": ("lunch", "午餐"),
+                "dinner": ("dinner", "晚餐"),
+                "other": ("other", "其他"),
+            }.get(meal_time, (meal_time,))
+            placeholders = ",".join("?" for _ in variants)
+            sql += f" AND meal_time IN ({placeholders})"
+            params.extend(variants)
+        sql += " ORDER BY date DESC, meal_time, id"
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def add_food_record(self, date: str, meal_time: str, name: str,
+                        price: float = 0, calories: float = 0, protein: float = 0,
+                        fat: float = 0, carbs: float = 0, grams: float = 0,
+                        recommended_grams: float = 0,
+                        remark: str = "", user_id: int | None = None) -> int:
+        sql = """INSERT INTO food_record (date, meal_time, name, price, calories, protein, fat, carbs, grams, recommended_grams, remark, user_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+        with self._connect() as conn:
+            cur = conn.execute(
+                sql, (date, meal_time, name, price, calories, protein, fat, carbs, grams, recommended_grams, remark, user_id))
+            return cur.lastrowid
+
+    def update_food_record(self, record_id: int, date: str | None = None,
+                           meal_time: str | None = None, name: str | None = None,
+                           price: float | None = None, calories: float | None = None,
+                           protein: float | None = None, fat: float | None = None,
+                           carbs: float | None = None, grams: float | None = None,
+                           recommended_grams: float | None = None,
+                           remark: str | None = None,
+                           user_id: int | None = None) -> bool:
+        """修改一条手工饮食记录。仅更新传入字段；user_id 用于越权校验。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM food_record WHERE id = ?", (record_id,)).fetchone()
+            if row is None:
+                return False
+            if user_id is not None and row["user_id"] != user_id:
+                return False
+            sets, params = [], []
+            if date is not None: sets.append("date = ?"); params.append(date)
+            if meal_time is not None: sets.append("meal_time = ?"); params.append(meal_time)
+            if name is not None: sets.append("name = ?"); params.append(name)
+            if price is not None: sets.append("price = ?"); params.append(price)
+            if calories is not None: sets.append("calories = ?"); params.append(calories)
+            if protein is not None: sets.append("protein = ?"); params.append(protein)
+            if fat is not None: sets.append("fat = ?"); params.append(fat)
+            if carbs is not None: sets.append("carbs = ?"); params.append(carbs)
+            if grams is not None: sets.append("grams = ?"); params.append(grams)
+            if recommended_grams is not None: sets.append("recommended_grams = ?"); params.append(recommended_grams)
+            if remark is not None: sets.append("remark = ?"); params.append(remark)
+            if not sets:
+                return True
+            sets.append("updated_at = datetime('now','localtime')")
+            params.append(record_id)
+            cur = conn.execute(
+                f"UPDATE food_record SET {', '.join(sets)} WHERE id = ?", params)
+            return cur.rowcount > 0
+
+    def delete_food_record(self, record_id: int, user_id: int | None = None) -> bool:
+        """物理删除一条手工饮食记录。"""
+        with self._connect() as conn:
+            if user_id is None:
+                cur = conn.execute(
+                    "DELETE FROM food_record WHERE id = ?", (record_id,))
+            else:
+                cur = conn.execute(
+                    "DELETE FROM food_record WHERE id = ? AND user_id = ?",
+                    (record_id, user_id))
+            return cur.rowcount > 0
+
+    def get_meal_record(self, record_id: int) -> Optional[dict]:
+        """按 id 查询单条饮食记录（含菜品信息），不存在返回 None。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                """SELECT mr.*, d.name AS dish_name, d.category, d.price
+                   FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
+                   WHERE mr.id = ?""",
+                (record_id,)).fetchone()
+        return dict(row) if row else None
 
     def confirm_records(self, record_ids: list[int]) -> int:
         """批量确认，返回实际确认条数。"""
@@ -891,26 +1138,25 @@ class SQLiteDatabase(DatabaseInterface):
         start = end - timedelta(days=days - 1)
 
         with self._connect() as conn:
-            if user_id is None:
-                rows = conn.execute(
-                    "SELECT * FROM v_day_total WHERE date BETWEEN ? AND ? ORDER BY date",
-                    (start.isoformat(), end.isoformat())).fetchall()
-            else:
-                rows = conn.execute(
-                    """SELECT mr.date,
-                              SUM(d.calories * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0
-                                                     THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_calories,
-                              SUM(d.protein * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0
-                                                    THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_protein,
-                              SUM(d.carbs * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0
-                                                  THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_carbs,
-                              SUM(d.fat * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0
-                                                THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_fat,
-                              COUNT(DISTINCT mr.id) AS dish_count
-                       FROM meal_record mr JOIN dish d ON mr.dish_id = d.id
-                       WHERE mr.confirmed = 1 AND mr.date BETWEEN ? AND ? AND mr.user_id = ?
-                       GROUP BY mr.date ORDER BY mr.date""",
-                    (start.isoformat(), end.isoformat(), user_id)).fetchall()
+            # 数据源与饮食记录页一致（food_record）：按实际克重/推荐克重折算营养
+            sql = """SELECT fr.date,
+                              SUM(fr.calories * (CASE WHEN fr.grams > 0 AND fr.recommended_grams > 0
+                                                     THEN fr.grams / fr.recommended_grams ELSE 1 END)) AS total_calories,
+                              SUM(fr.protein * (CASE WHEN fr.grams > 0 AND fr.recommended_grams > 0
+                                                     THEN fr.grams / fr.recommended_grams ELSE 1 END)) AS total_protein,
+                              SUM(fr.carbs * (CASE WHEN fr.grams > 0 AND fr.recommended_grams > 0
+                                                   THEN fr.grams / fr.recommended_grams ELSE 1 END)) AS total_carbs,
+                              SUM(fr.fat * (CASE WHEN fr.grams > 0 AND fr.recommended_grams > 0
+                                                 THEN fr.grams / fr.recommended_grams ELSE 1 END)) AS total_fat,
+                              COUNT(DISTINCT fr.id) AS dish_count
+                       FROM food_record fr
+                       WHERE fr.date BETWEEN ? AND ?"""
+            params: list = [start.isoformat(), end.isoformat()]
+            if user_id is not None:
+                sql += " AND fr.user_id = ?"
+                params.append(user_id)
+            sql += " GROUP BY fr.date ORDER BY fr.date"
+            rows = conn.execute(sql, params).fetchall()
 
         day_map = {r["date"]: dict(r) for r in rows}
         trend = []
@@ -1105,6 +1351,77 @@ class SQLiteDatabase(DatabaseInterface):
                 if row.get("weather_type") == weather_type and row.get("keyword"):
                     tags.append((row["match_field"], row["keyword"]))
         return tags
+
+    # ---- v1.3 chat（历史对话） ----
+
+    def _ensure_chat_session(self, session_id: str,
+                             user_id: Optional[int] = None,
+                             title: str = "") -> int:
+        """确保会话记录存在，返回 chat_session.id。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT id FROM chat_session WHERE session_id = ?",
+                (session_id,)).fetchone()
+            if row:
+                now = "datetime('now','localtime')"
+                conn.execute(
+                    f"UPDATE chat_session SET updated_at = {now} WHERE id = ?",
+                    (row["id"],))
+                return row["id"]
+            cur = conn.execute(
+                "INSERT INTO chat_session (session_id, title, user_id) VALUES (?, ?, ?)",
+                (session_id, title[:50], user_id))
+            return cur.lastrowid
+
+    def add_chat_message(self, session_id: str, role: str, content: str,
+                         user_id: Optional[int] = None) -> int:
+        """追加一条对话消息。role: user / assistant。"""
+        self._ensure_chat_session(session_id, user_id=user_id)
+        with self._connect() as conn:
+            cur = conn.execute(
+                "INSERT INTO chat_message (session_id, role, content) VALUES (?, ?, ?)",
+                (session_id, role, content))
+            return cur.lastrowid
+
+    def get_chat_messages(self, session_id: str) -> list[dict]:
+        """按时间顺序返回会话全部消息。"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT role, content, created_at FROM chat_message "
+                "WHERE session_id = ? ORDER BY id",
+                (session_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def list_chat_sessions(self, user_id: Optional[int] = None,
+                           limit: int = 50) -> list[dict]:
+        """列出历史会话（按更新时间倒序）。user_id=None 时返回全部（游客/历史）。"""
+        with self._connect() as conn:
+            if user_id is None:
+                rows = conn.execute(
+                    "SELECT session_id, title, created_at, updated_at "
+                    "FROM chat_session ORDER BY updated_at DESC LIMIT ?",
+                    (limit,)).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT session_id, title, created_at, updated_at "
+                    "FROM chat_session WHERE user_id = ? "
+                    "ORDER BY updated_at DESC LIMIT ?",
+                    (user_id, limit)).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_chat_session(self, session_id: str,
+                            user_id: Optional[int] = None) -> bool:
+        """删除会话（含消息）。user_id 用于越权校验；None 时任意删。"""
+        with self._connect() as conn:
+            if user_id is None:
+                cur = conn.execute(
+                    "DELETE FROM chat_session WHERE session_id = ?",
+                    (session_id,))
+            else:
+                cur = conn.execute(
+                    "DELETE FROM chat_session WHERE session_id = ? AND user_id = ?",
+                    (session_id, user_id))
+            return cur.rowcount > 0
 
 
 # =============================================================================

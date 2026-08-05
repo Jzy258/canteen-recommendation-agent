@@ -1,6 +1,6 @@
 -- ============================================================
 -- 食堂菜品推荐与营养分析 Agent — SQLite Schema
--- 版本：v1.2（克重调控：dish.serving_grams 标准份量克数；meal_record.grams 实际摄入克重）
+-- 版本：v1.3（历史对话：chat_session/chat_message 表）
 -- 所有者：A · 数据与算法
 -- 说明：本 schema 为唯一来源，B 的 store/record 工具只读此 schema
 -- ============================================================
@@ -209,3 +209,51 @@ JOIN dish d ON mr.dish_id = d.id
 WHERE mr.confirmed = 1
 GROUP BY week_key
 ORDER BY week_key;
+
+
+-- 6. chat_session — 对话会话（v1.3 新增）
+CREATE TABLE IF NOT EXISTS chat_session (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id  TEXT    NOT NULL UNIQUE,                  -- 会话 UUID
+    title       TEXT    DEFAULT '',                       -- 会话标题（首条用户消息截断）
+    user_id     INTEGER REFERENCES app_user(id) ON DELETE SET NULL,  -- 归属用户（NULL=游客）
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    updated_at  TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_session_user ON chat_session(user_id);
+CREATE INDEX IF NOT EXISTS idx_chat_session_sid ON chat_session(session_id);
+
+
+-- 7. chat_message — 对话消息（v1.3 新增）
+CREATE TABLE IF NOT EXISTS chat_message (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id  TEXT    NOT NULL REFERENCES chat_session(session_id) ON DELETE CASCADE,
+    role        TEXT    NOT NULL CHECK (role IN ('user','assistant')),  -- 消息角色
+    content     TEXT    NOT NULL,                                      -- 消息文本
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_message_session ON chat_message(session_id);
+
+
+-- 6. food_record — 手工饮食记录（CRUD，含备注；独立于 HITL 的 meal_record）
+CREATE TABLE IF NOT EXISTS food_record (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    date        TEXT    NOT NULL,                     -- 就餐日期 YYYY-MM-DD
+    meal_time   TEXT    NOT NULL,                     -- 餐次：breakfast / lunch / dinner
+    name        TEXT    NOT NULL,                     -- 菜品名称
+    price       REAL    NOT NULL DEFAULT 0,           -- 价格（元）
+    calories    REAL    NOT NULL DEFAULT 0,           -- 热量 kcal
+    protein     REAL    NOT NULL DEFAULT 0,           -- 蛋白质 g
+    fat         REAL    NOT NULL DEFAULT 0,           -- 脂肪 g
+    carbs       REAL    NOT NULL DEFAULT 0,           -- 碳水化合物 g
+    grams       REAL    NOT NULL DEFAULT 0,           -- 实际摄入克重 g
+    recommended_grams REAL NOT NULL DEFAULT 0,        -- 推荐克重（dish.serving_grams）g
+    remark      TEXT    DEFAULT '',                   -- 备注
+    user_id     INTEGER REFERENCES app_user(id) ON DELETE SET NULL,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    updated_at  TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_food_record_date ON food_record(date);
+CREATE INDEX IF NOT EXISTS idx_food_record_user ON food_record(user_id);

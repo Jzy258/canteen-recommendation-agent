@@ -50,7 +50,7 @@ app.include_router(admin_router)
 # 挂载本地 swagger-ui 静态资源
 app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
-agent = create_agent_executor()
+# agent 改为按请求创建（绑定当前登录用户），见 chat / chat_stream
 
 # ---- 推荐类工具输出 -> 前端结构化菜品/组合（建议1/2） ----
 # 普通推荐/检索类工具：返回 list[dict] 或 dict（含 dishes）
@@ -241,6 +241,126 @@ def records(start_date: str = "", end_date: str = "", meal_time: str = "",
                                          user_id=uid)
 
 
+class RecordUpdateRequest(BaseModel):
+    date: str | None = None
+    meal_time: str | None = None
+    dish_id: int | None = None
+    portion: float | None = None
+    grams: float | None = None
+
+
+@app.put("/records/{record_id}")
+def update_record(record_id: int, req: RecordUpdateRequest,
+                  user: dict | None = Depends(get_optional_user)):
+    """修改一条饮食记录（仅更新传入字段）。登录用户仅能改自己的。"""
+    from db import get_db
+    uid = user["id"] if user else None
+    ok = get_db().update_meal_record(
+        record_id,
+        date=req.date,
+        meal_time=req.meal_time,
+        dish_id=req.dish_id,
+        portion=req.portion,
+        grams=req.grams,
+        user_id=uid,
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="记录不存在或无权修改")
+    return {"ok": True}
+
+
+@app.delete("/records/{record_id}")
+def delete_record(record_id: int, user: dict | None = Depends(get_optional_user)):
+    """删除一条饮食记录。登录用户仅能删自己的。"""
+    from db import get_db
+    uid = user["id"] if user else None
+    ok = get_db().delete_meal_record(record_id, user_id=uid)
+    if not ok:
+        raise HTTPException(status_code=404, detail="记录不存在或无权删除")
+    return {"ok": True}
+
+
+class FoodRecordCreate(BaseModel):
+    date: str
+    meal_time: str
+    name: str
+    price: float = 0
+    calories: float = 0
+    protein: float = 0
+    fat: float = 0
+    carbs: float = 0
+    grams: float = 0
+    recommended_grams: float = 0
+    remark: str = ""
+
+
+class FoodRecordUpdate(BaseModel):
+    date: str | None = None
+    meal_time: str | None = None
+    name: str | None = None
+    price: float | None = None
+    calories: float | None = None
+    protein: float | None = None
+    fat: float | None = None
+    carbs: float | None = None
+    grams: float | None = None
+    recommended_grams: float | None = None
+    remark: str | None = None
+
+
+@app.get("/food-records")
+def food_records(start_date: str = "", end_date: str = "", meal_time: str = "",
+                 user: dict | None = Depends(get_optional_user)):
+    """手工饮食记录列表（按日期倒序）。"""
+    from db import get_db
+    uid = user["id"] if user else None
+    return get_db().get_food_records(
+        start_date=start_date, end_date=end_date, meal_time=meal_time, user_id=uid)
+
+
+@app.post("/food-records", status_code=201)
+def create_food_record(req: FoodRecordCreate,
+                       user: dict | None = Depends(get_optional_user)):
+    """新增一条手工饮食记录。"""
+    from db import get_db
+    uid = user["id"] if user else None
+    rid = get_db().add_food_record(
+        date=req.date, meal_time=req.meal_time, name=req.name,
+        price=req.price, calories=req.calories, protein=req.protein,
+        fat=req.fat, carbs=req.carbs, grams=req.grams,
+        recommended_grams=req.recommended_grams,
+        remark=req.remark, user_id=uid)
+    return {"id": rid, "ok": True}
+
+
+@app.put("/food-records/{record_id}")
+def update_food_record(record_id: int, req: FoodRecordUpdate,
+                       user: dict | None = Depends(get_optional_user)):
+    """修改一条手工饮食记录。"""
+    from db import get_db
+    uid = user["id"] if user else None
+    ok = get_db().update_food_record(
+        record_id, date=req.date, meal_time=req.meal_time, name=req.name,
+        price=req.price, calories=req.calories, protein=req.protein,
+        fat=req.fat, carbs=req.carbs, grams=req.grams,
+        recommended_grams=req.recommended_grams,
+        remark=req.remark, user_id=uid)
+    if not ok:
+        raise HTTPException(status_code=404, detail="记录不存在或无权修改")
+    return {"ok": True}
+
+
+@app.delete("/food-records/{record_id}")
+def delete_food_record(record_id: int, user: dict | None = Depends(get_optional_user)):
+    """删除一条手工饮食记录。"""
+    from db import get_db
+    uid = user["id"] if user else None
+    ok = get_db().delete_food_record(record_id, user_id=uid)
+    if not ok:
+        raise HTTPException(status_code=404, detail="记录不存在或无权删除")
+    return {"ok": True}
+
+
 class ProfileUpdateRequest(BaseModel):
     budget: float | None = None
     budget_min: float | None = None
@@ -283,18 +403,20 @@ def update_profile(req: ProfileUpdateRequest,
 
 
 @app.post("/chat", response_model=ChatResponse)
-def chat(req: ChatRequest):
+def chat(req: ChatRequest, user: dict | None = Depends(get_optional_user)):
     if not req.message or not req.message.strip():
         logger.warning("空消息被拒绝")
         raise HTTPException(status_code=400, detail="消息不能为空")
 
+    uid = user["id"] if user else None
     session_id = req.session_id or str(uuid.uuid4())
     history = session_store.get(session_id)
     logger.info("chat 请求 | session=%s | msg=%s", session_id, req.message[:200])
 
     try:
         messages = history + [HumanMessage(content=req.message)]
-        result = agent.invoke({"messages": messages})
+        req_agent = create_agent_executor(uid)
+        result = req_agent.invoke({"messages": messages})
         # last message is the final AI reply
         reply = clean_markdown(result["messages"][-1].content)
         # Token 统计（tiktoken 精确计数，回退字符估算）
@@ -308,17 +430,18 @@ def chat(req: ChatRequest):
                          session_id, req.message[:200], e)
         reply = "抱歉，系统处理出错，请稍后再试或换一种问法。"
 
-    # persist to memory (trim old turns)
-    session_store.append(session_id, req.message, reply)
+    # persist to db (历史持久化)
+    session_store.append(session_id, req.message, reply, user_id=uid)
 
     return ChatResponse(reply=reply, session_id=session_id)
 
 
-def _stream_reply(session_id: str, message: str):
+def _stream_reply(session_id: str, message: str, user_id: int | None = None):
     """真实流式输出：通过 agent.astream_events 逐 token 推送 LLM 生成内容。"""
     history = session_store.get(session_id)
     logger.info("chat/stream 请求 | session=%s | msg=%s", session_id, message[:200])
     messages = history + [HumanMessage(content=message)]
+    req_agent = create_agent_executor(user_id)
 
     async def gen():
         # 先发 session 元数据
@@ -334,7 +457,7 @@ def _stream_reply(session_id: str, message: str):
         # 工具调用的 AIMessageChunk 带 tool_call_chunks，其 content 属中间过程，
         # 实时丢弃；最终回复的 chunk 无 tool_call_chunks，正常实时推送。
         try:
-            async for event in agent.astream_events(
+            async for event in req_agent.astream_events(
                     {"messages": messages}, version="v2"):
                 ev = event.get("event")
                 if ev == "on_chat_model_stream":
@@ -420,7 +543,7 @@ def _stream_reply(session_id: str, message: str):
 
         # Token 统计 + 会话持久化（流式结束时统一处理）
         add_tokens(count_tokens(message) + count_tokens(reply))
-        session_store.append(session_id, message, reply)
+        session_store.append(session_id, message, reply, user_id=user_id)
         logger.info("chat/stream 完成 | session=%s | reply_len=%s", session_id, len(reply))
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
@@ -432,12 +555,46 @@ def _stream_reply(session_id: str, message: str):
 
 
 @app.post("/chat/stream")
-def chat_stream(req: ChatRequest):
+def chat_stream(req: ChatRequest, user: dict | None = Depends(get_optional_user)):
     """流式对话：SSE 输出，先 session 元数据，再 content 增量，最后 done。"""
     if not req.message or not req.message.strip():
         raise HTTPException(status_code=400, detail="消息不能为空")
     session_id = req.session_id or str(uuid.uuid4())
-    return _stream_reply(session_id, req.message)
+    uid = user["id"] if user else None
+    return _stream_reply(session_id, req.message, user_id=uid)
+
+
+# =============================================================================
+# 历史对话（v1.3）
+# =============================================================================
+
+@app.get("/sessions")
+def list_sessions(user: dict | None = Depends(get_optional_user),
+                  limit: int = 50):
+    """历史会话列表（按更新时间倒序）。登录用户返回本人会话；游客返回全部。"""
+    from db import get_db
+    uid = user["id"] if user else None
+    return get_db().list_chat_sessions(user_id=uid, limit=min(limit, 200))
+
+
+@app.get("/sessions/{session_id}/messages")
+def get_session_messages(session_id: str,
+                         user: dict | None = Depends(get_optional_user)):
+    """某会话的完整消息历史（供前端恢复对话）。"""
+    from db import get_db
+    return get_db().get_chat_messages(session_id)
+
+
+@app.delete("/sessions/{session_id}")
+def delete_session(session_id: str,
+                   user: dict | None = Depends(get_optional_user)):
+    """删除历史会话（登录用户仅能删自己的；游客删任意）。"""
+    from db import get_db
+    uid = user["id"] if user else None
+    ok = get_db().delete_chat_session(session_id, user_id=uid)
+    if not ok:
+        raise HTTPException(status_code=404, detail="会话不存在或无权删除")
+    return {"ok": True}
 
 
 if __name__ == "__main__":

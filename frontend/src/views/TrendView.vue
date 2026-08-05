@@ -23,6 +23,14 @@ let calChart: ECharts | null = null
 let macroChart: ECharts | null = null
 let compareChart: ECharts | null = null
 
+// 营养日均对比所对应的当天日期（数据截止日）
+const latestDate = computed(() => {
+  const last = trend.value[trend.value.length - 1]
+  if (!last || !last.date) return ''
+  const [, m, d] = last.date.split('-')
+  return `${Number(m)}月${Number(d)}日`
+})
+
 // C10 · 汇总统计
 const stats = computed(() => {
   const pts = trend.value
@@ -369,7 +377,7 @@ onActivated(() => {
 
       <!-- 图表三：营养日均对比（建议6，横向条形图） -->
       <div class="trend-chart-block">
-        <div class="block-title">📊 营养日均对比</div>
+        <div class="block-title">📊 营养日均对比<span v-if="latestDate" class="block-date">{{ latestDate }}</span></div>
         <div class="trend-chart-wrap">
           <div class="trend-chart" ref="compareChartRef" />
           <el-skeleton v-if="loading" :rows="5" animated class="trend-skeleton" />
@@ -516,6 +524,13 @@ onActivated(() => {
 .trend-chart-block + .trend-chart-block {
   border-top: 1px dashed var(--el-color-primary-light-8);
   padding-top: 16px;
+}
+
+.block-date {
+  font-size: 12px;
+  font-weight: 500;
+  color: #909399;
+  margin-left: 8px;
 }
 
 .block-title {

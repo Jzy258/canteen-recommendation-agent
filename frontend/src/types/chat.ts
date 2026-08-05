@@ -95,6 +95,8 @@ export interface MealRecordItem {
   fat: number
   price: number
   category: string
+  grams?: number | null
+  serving_grams?: number | null
 }
 
 export interface ChatMessage {
@@ -125,4 +127,20 @@ export interface UserProfile {
   dietary_restrictions: string
   /** 所在地区（城市），用于天气推荐 */
   region?: string
+}
+
+/** 手工饮食记录（food_record，后端 /food-records CRUD） */
+export interface FoodRecordItem {
+  id: number
+  date: string
+  meal_time: string
+  name: string
+  price: number
+  calories: number
+  protein: number
+  fat: number
+  carbs: number
+  grams: number
+  recommended_grams: number
+  remark?: string
 }

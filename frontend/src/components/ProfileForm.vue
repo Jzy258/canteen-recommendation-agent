@@ -174,7 +174,20 @@ async function locate(): Promise<void> {
   }
 }
 
+// 预算范围校验：最低 > 最高 为非法（输入框失焦 / 滑块停止拖动时触发）
+const budgetError = ref(false)
+
+function validateBudget(): void {
+  budgetError.value = budgetRange.value[0] > budgetRange.value[1]
+}
+
 async function save(): Promise<void> {
+  // 校验失败：禁止保存本次预算、不更新后端、保留用户当前输入，让用户自行调整
+  if (budgetRange.value[0] > budgetRange.value[1]) {
+    budgetError.value = true
+    ElMessage.warning('请重新填写，最低预算不能高于最高预算')
+    return
+  }
   const profile: UserProfile = {
     budget: budgetRange.value[1],
     budget_min: budgetRange.value[0],
@@ -211,15 +224,19 @@ defineExpose({ save })
           :min="BUDGET_MIN"
           :max="BUDGET_MAX"
           class="pf-slider"
+          @change="validateBudget"
         />
       </div>
       <div class="pf-body budget-inputs">
         <span class="budget-label">最低</span>
-        <el-input-number v-model="budgetRange[0]" :min="BUDGET_MIN" :max="BUDGET_MAX" size="small" />
+        <el-input-number v-model="budgetRange[0]" :min="BUDGET_MIN" :max="BUDGET_MAX" size="small" @blur="validateBudget" />
         <span class="budget-sep">~</span>
         <span class="budget-label">最高</span>
-        <el-input-number v-model="budgetRange[1]" :min="BUDGET_MIN" :max="BUDGET_MAX" size="small" />
+        <el-input-number v-model="budgetRange[1]" :min="BUDGET_MIN" :max="BUDGET_MAX" size="small" @blur="validateBudget" />
         <span class="unit">元</span>
+      </div>
+      <div v-if="budgetError" class="budget-error">
+        请重新填写，最低预算不能高于最高预算
       </div>
     </div>
 
@@ -459,5 +476,10 @@ defineExpose({ save })
 .pf-actions {
   display: flex;
   gap: 10px;
+}
+.budget-error {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--el-color-danger);
 }
 </style>

@@ -29,14 +29,45 @@ def _normalize_date(date_str: str) -> str:
     return mapping[s].isoformat() if s in mapping else date_str
 
 
-@tool
-def record_meal(date: str, meal_time: str, dish_id: int, portion: float = 1.0,
-                grams: float | None = None) -> int:
-    """记录一餐摄入（待确认状态），返回记录 id。
-    date：日期（YYYY-MM-DD），也支持 today/今天/昨天 等相对写法。
-    grams：实际摄入克重（可选）。提供时按克重折算营养；不提供则按 portion 份数。"""
-    return _db().add_meal_record(_normalize_date(date), meal_time, dish_id,
-                                 portion, grams=grams)
+def make_record_meal(user_id: int | None = None):
+    """构造 record_meal 工具并闭包绑定归属用户（agent 运行时按当前登录用户注入）。"""
+    @tool
+    def record_meal(date: str, meal_time: str, dish_id: int, portion: float = 1.0,
+                    grams: float | None = None) -> int:
+        """记录一餐摄入（待确认状态），返回记录 id。
+        date：日期（YYYY-MM-DD），也支持 today/今天/昨天 等相对写法。
+        grams：实际摄入克重（可选）。提供时按克重折算营养；不提供则按 portion 份数。"""
+        db = _db()
+        n_date = _normalize_date(date)
+        rid = db.add_meal_record(n_date, meal_time, dish_id, portion,
+                                 user_id=user_id, grams=grams)
+        # 同步写入 food_record（饮食记录页数据源），确保聊天记录的饮食在记录页可见。
+        # 写 food_record 失败不影响主流程（meal_record 仍用于趋势/营养统计）。
+        try:
+            dish = db.get_dish_by_id(dish_id)
+            if dish:
+                db.add_food_record(
+                    date=n_date,
+                    meal_time=meal_time,
+                    name=dish.get("name") or "",
+                    price=dish.get("price") or 0,
+                    calories=dish.get("calories") or 0,
+                    protein=dish.get("protein") or 0,
+                    fat=dish.get("fat") or 0,
+                    carbs=dish.get("carbs") or 0,
+                    grams=grams or 0,
+                    recommended_grams=dish.get("serving_grams") or 0,
+                    remark="（聊天记录）",
+                    user_id=user_id,
+                )
+        except Exception:
+            pass
+        return rid
+    return record_meal
+
+
+# 默认（游客）record_meal，供工具注册中心引用
+record_meal = make_record_meal(None)
 
 
 @tool

@@ -4,6 +4,7 @@ from langchain.agents import create_agent
 from llm.client import get_llm
 from middleware.logger_config import get_logger
 from tools.registry import ALL_TOOLS
+from tools.record import make_record_meal
 
 logger = get_logger("canteen.tools")
 
@@ -25,8 +26,15 @@ def safe_tool(tool_obj):
     return tool_obj
 
 
-# 从注册中心取全部工具，每个包异常兜底，保证工具异常不打断 Agent 循环
-tools = [safe_tool(t) for t in ALL_TOOLS]
+# 按需组装工具：record_meal 用闭包绑定当前登录用户，其余工具取注册中心并异常兜底。
+def _build_tools(user_id: int | None = None) -> list:
+    tools = []
+    for t in ALL_TOOLS:
+        if t.name == "record_meal":
+            tools.append(safe_tool(make_record_meal(user_id)))
+        else:
+            tools.append(safe_tool(t))
+    return tools
 
 SYSTEM_PROMPT = (
     "You are a helpful canteen meal assistant. You help users find dishes "
@@ -70,11 +78,12 @@ SYSTEM_PROMPT = (
 )
 
 
-def create_agent_executor():
+def create_agent_executor(user_id: int | None = None):
+    """创建 agent。传入 user_id 时，record_meal 工具会将记录归属到该用户。"""
     llm = get_llm()
     agent = create_agent(
         llm,
-        tools,
+        _build_tools(user_id),
         system_prompt=SYSTEM_PROMPT,
     )
     return agent

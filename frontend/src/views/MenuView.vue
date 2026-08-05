@@ -31,6 +31,10 @@ const calMin = ref<number | undefined>()   // 热量区间
 const calMax = ref<number | undefined>()
 const protMin = ref<number | undefined>()  // 蛋白质区间
 const protMax = ref<number | undefined>()
+const fatMin = ref<number | undefined>()    // 脂肪区间
+const fatMax = ref<number | undefined>()
+const carbMin = ref<number | undefined>()  // 碳水区间
+const carbMax = ref<number | undefined>()
 const sortBy = ref('')                     // 排序：cal-asc / cal-desc / price-asc / price-desc
 
 // 类别筛选选项（“汤品”匹配 category === '汤'）
@@ -71,6 +75,12 @@ const filtered = computed(() => {
   const rMin = protMin.value, rMax = protMax.value
   if (rMin != null) list = list.filter((d) => Number(d.protein) >= rMin)
   if (rMax != null) list = list.filter((d) => Number(d.protein) <= rMax)
+  const fMin = fatMin.value, fMax = fatMax.value
+  if (fMin != null) list = list.filter((d) => Number(d.fat) >= fMin)
+  if (fMax != null) list = list.filter((d) => Number(d.fat) <= fMax)
+  const cbMin = carbMin.value, cbMax = carbMax.value
+  if (cbMin != null) list = list.filter((d) => Number(d.carbs) >= cbMin)
+  if (cbMax != null) list = list.filter((d) => Number(d.carbs) <= cbMax)
   const s = sortBy.value
   if (s) {
     const key = s.startsWith('price') ? 'price' : 'calories'
@@ -90,6 +100,10 @@ function resetFilters(): void {
   calMax.value = undefined
   protMin.value = undefined
   protMax.value = undefined
+  fatMin.value = undefined
+  fatMax.value = undefined
+  carbMin.value = undefined
+  carbMax.value = undefined
   sortBy.value = ''
 }
 
@@ -171,6 +185,22 @@ onMounted(load)
           <el-input-number v-model="protMax" :min="0" :max="100" placeholder="最高" controls-position="right" class="mf-num" />
           <span class="mf-unit">g</span>
         </div>
+
+        <div class="mf-row">
+          <span class="mf-label">脂肪</span>
+          <el-input-number v-model="fatMin" :min="0" :max="100" placeholder="最低" controls-position="right" class="mf-num" />
+          <span class="mf-sep">-</span>
+          <el-input-number v-model="fatMax" :min="0" :max="100" placeholder="最高" controls-position="right" class="mf-num" />
+          <span class="mf-unit">g</span>
+        </div>
+
+        <div class="mf-row">
+          <span class="mf-label">碳水</span>
+          <el-input-number v-model="carbMin" :min="0" :max="200" placeholder="最低" controls-position="right" class="mf-num" />
+          <span class="mf-sep">-</span>
+          <el-input-number v-model="carbMax" :min="0" :max="200" placeholder="最高" controls-position="right" class="mf-num" />
+          <span class="mf-unit">g</span>
+        </div>
       </div>
 
       <!-- 菜品卡片网格 -->
@@ -179,9 +209,12 @@ onMounted(load)
           <div class="mi-cat">{{ d.category }}</div>
           <div class="mi-name">{{ d.name }}</div>
           <div class="mi-price">¥{{ Number(d.price).toFixed(2) }}</div>
+          <div class="mi-weight">每份 {{ d.serving_grams || '--' }}g</div>
           <div class="mi-nut">
             <span>{{ Number(d.calories) || 0 }} kcal</span>
             <span>· {{ Number(d.protein) || 0 }} g 蛋白质</span>
+            <span>· {{ Number(d.fat) || 0 }} g 脂肪</span>
+            <span>· {{ Number(d.carbs) || 0 }} g 碳水</span>
           </div>
           <div v-if="tags(d).length" class="mi-tags">
             <span v-for="tag in tags(d)" :key="tag" class="mi-tag">{{ tag }}</span>
@@ -322,6 +355,12 @@ onMounted(load)
   color: #e6a23c;
   font-weight: 700;
   font-size: 15px;
+}
+
+.mi-weight {
+  margin-top: 3px;
+  font-size: 12px;
+  color: #909399;
 }
 
 .mi-nut {

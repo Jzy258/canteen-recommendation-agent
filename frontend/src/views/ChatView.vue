@@ -1,13 +1,11 @@
 <script setup lang="ts">
-import { nextTick, onActivated, ref } from 'vue'
-import { ElMessage } from 'element-plus'
-import { ChatDotRound, Plus, User } from '@element-plus/icons-vue'
-import { chat, chatStream } from '@/api/chat'
-import { parseDishes } from '@/utils/parseDishes'
+import { nextTick, onActivated, onMounted, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { ChatDotRound, MoreFilled, Plus, User } from '@element-plus/icons-vue'
+import { chat, chatStream, listSessions, getSessionMessages, deleteSession, type ChatSessionItem } from '@/api/chat'
 import { track } from '@/utils/analytics'
 import DishCard from '@/components/DishCard.vue'
 import MealComboCard from '@/components/MealComboCard.vue'
-import TodayOverview from '@/components/TodayOverview.vue'
 import { useChatStore } from '@/stores/chat'
 import { useProfileStore } from '@/stores/profile'
 import type { ChatMessage, ComboMeal, ParsedDish } from '@/types/chat'
@@ -23,6 +21,10 @@ const QUICK_PROMPTS = [
 
 const messages = ref<ChatMessage[]>([])
 const input = ref('')
+
+// ---- 历史对话（v1.3） ----
+const sessions = ref<ChatSessionItem[]>([])
+const historyLoading = ref(false)
 
 // 菜品卡片点击后，把菜品名称填入输入框并聚焦：el-input 组件实例引用（用于调用 focus()）
 const inputRef = ref<{ focus?: () => void }>()
@@ -82,9 +84,9 @@ function finishAssistant(): void {
   const last = messages.value[messages.value.length - 1]
   if (!last || last.role !== 'assistant') return
   if (!last.time) last.time = nowTime()
-  // 结构化菜品数据（来自流式 dishes 事件）优先；否则从文本解析兜底
-  if (!last.dishes?.length) last.dishes = parseDishes(last.content)
-  if (last.dishes.length) {
+  // 仅渲染后端结构化推荐（dishes/combo 事件）返回的菜品卡片；
+  // 不再从回复文本解析兜底，避免普通问答/营养科普等非推荐场景误渲染菜品卡片。
+  if (last.dishes?.length) {
     track('dish_expose', { count: last.dishes.length })
   }
 }
@@ -110,14 +112,6 @@ function handleDishCardClick(dishItem: ParsedDish): void {
     input.value = name
   }
   // 输入框自动获取光标焦点，允许用户继续编辑（focus 为可选方法，用 ?. 避免未定义调用）
-  nextTick(() => inputRef.value?.focus?.())
-}
-
-/**
- * 今日工作台「今日吃什么」入口：填入输入框并聚焦，不自动发送。
- */
-function handleTodayRecommend(): void {
-  input.value = '推荐今天吃什么'
   nextTick(() => inputRef.value?.focus?.())
 }
 
@@ -149,6 +143,8 @@ async function sendByStream(text: string): Promise<'ok' | 'aborted' | 'failed'> 
           }
         } else if (event.type === 'done') {
           succeeded = true
+          // 此轮对话可能新建了会话，刷新右侧历史对话列表
+          loadSessionList()
           // 对话结束：此时才挂载菜品卡片 / 组合卡
           if (pendingCombo) {
             currentAssistant().combo = pendingCombo
@@ -236,6 +232,8 @@ async function send(): Promise<void> {
   }
   finishAssistant()
   track('chat_reply', { status, durationMs: Date.now() - startedAt })
+  // 新会话产生后刷新历史列表
+  loadSessionList()
 }
 
 function stop(): void {
@@ -250,9 +248,124 @@ function startNewSession(): void {
   messages.value = []
 }
 
+// ---- 历史对话（v1.3） ----
+
+function fmtSessionTime(ts: string): string {
+  if (!ts) return ''
+  const d = new Date(ts.replace(' ', 'T'))
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
+async function loadSessionList(): Promise<void> {
+  historyLoading.value = true
+  try {
+    // 按创建时间倒序
+    sessions.value = (await listSessions()).slice().sort(
+      (a, b) => (b.created_at || '').localeCompare(a.created_at || ''),
+    )
+  } catch {
+    // 列表加载失败不阻塞聊天
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+async function loadHistory(): Promise<void> {
+  if (!chatStore.sessionId) return
+  try {
+    const items = await getSessionMessages(chatStore.sessionId)
+    messages.value = items.map((m) => ({
+      role: m.role,
+      content: m.content,
+      time: m.created_at
+        ? new Date(m.created_at.replace(' ', 'T')).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+        : undefined,
+    }))
+    scrollToBottom()
+  } catch {
+    // 历史加载失败则空会话
+  }
+}
+
+async function switchSession(sid: string): Promise<void> {
+  if (loading.value) stop()
+  chatStore.setSession(sid)
+  await loadHistory()
+}
+
+async function removeSession(sid: string): Promise<void> {
+  try {
+    await ElMessageBox.confirm('确定删除该历史对话吗？', '删除会话', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  try {
+    await deleteSession(sid)
+    sessions.value = sessions.value.filter((s) => s.session_id !== sid)
+    // 若删除的是当前会话，自动切换到其他会话
+    if (chatStore.sessionId === sid) {
+      const next = sessions.value[0]
+      if (next) {
+        await switchSession(next.session_id)
+      } else {
+        chatStore.clearSession()
+        messages.value = []
+      }
+    }
+    ElMessage.success('会话已删除')
+  } catch {
+    ElMessage.error('删除失败')
+  }
+}
+
+// ---- 重命名会话（预留接口，暂仅前端更新标题）----
+const renameVisible = ref(false)
+const renameTarget = ref<ChatSessionItem | null>(null)
+const renameInput = ref('')
+
+function openRename(s: ChatSessionItem): void {
+  renameTarget.value = s
+  renameInput.value = s.title || ''
+  renameVisible.value = true
+}
+
+async function submitRename(): Promise<void> {
+  if (!renameTarget.value) return
+  const title = renameInput.value.trim()
+  if (!title) {
+    ElMessage.warning('请输入新的会话名称')
+    return
+  }
+  const sid = renameTarget.value.session_id
+  // 预留：此处调用后端重命名接口（如 renameSession(sid, { title })）
+  const s = sessions.value.find((x) => x.session_id === sid)
+  if (s) s.title = title
+  ElMessage.success('会话已重命名')
+  renameVisible.value = false
+}
+
+// 会话条目“更多(・・・)”菜单命令
+function onSessionCommand(cmd: string, s: ChatSessionItem): void {
+  if (cmd === 'rename') openRename(s)
+  else if (cmd === 'delete') removeSession(s.session_id)
+}
+
 function onEnter(): void {
   send()
 }
+
+// 页面挂载：恢复当前会话历史 + 加载历史会话列表
+onMounted(async () => {
+  loadSessionList()
+  if (chatStore.sessionId) {
+    await loadHistory()
+  }
+})
 
 // keep-alive 激活：从其他标签页返回时滚动到底部，保持聊天视图
 onActivated(() => {
@@ -262,25 +375,20 @@ onActivated(() => {
 
 <template>
   <div class="chat-page">
-    <el-card class="chat-card" shadow="never">
-      <template #header>
-        <div class="chat-header">
-          <div class="chat-title">
-            <el-icon class="title-icon"><ChatDotRound /></el-icon>
-            <span>食堂菜品推荐与营养分析 Agent</span>
+    <!-- 左侧聊天主区域 -->
+    <div class="chat-main">
+      <el-card class="chat-card" shadow="never">
+        <template #header>
+          <div class="chat-header">
+            <div class="chat-title">
+              <el-icon class="title-icon"><ChatDotRound /></el-icon>
+              <span>食堂菜品推荐与营养分析 Agent</span>
+            </div>
           </div>
-          <el-button size="small" @click="startNewSession">
-            <el-icon style="margin-right: 4px"><Plus /></el-icon>
-            新会话
-          </el-button>
-        </div>
-      </template>
+        </template>
 
       <div ref="listRef" class="chat-list">
         <!-- 欢迎引导卡（B8） -->
-        <!-- 今日工作台（建议5）：欢迎态展示 -->
-        <TodayOverview v-if="messages.length === 0" @recommend="handleTodayRecommend" />
-
         <div v-if="messages.length === 0" class="chat-welcome">
           <div class="welcome-title">你好！我是食堂点餐参谋 👋</div>
           <div class="welcome-sub">
@@ -367,21 +475,154 @@ onActivated(() => {
           </el-button>
         </div>
       </div>
-    </el-card>
+        </el-card>
+    </div>
+
+    <!-- 右侧历史对话侧边栏 -->
+    <aside class="chat-sidebar">
+      <div class="sidebar-header">
+        <span class="sidebar-title">历史对话</span>
+        <el-button type="primary" size="small" :icon="Plus" @click="startNewSession">新建会话</el-button>
+      </div>
+      <div class="sidebar-list">
+        <div v-if="historyLoading" class="sidebar-tip">加载中…</div>
+        <template v-else-if="sessions.length">
+          <div
+            v-for="s in sessions"
+            :key="s.session_id"
+            class="sidebar-item"
+            :class="{ active: s.session_id === chatStore.sessionId }"
+            @click="switchSession(s.session_id)"
+          >
+            <div class="sidebar-item-main">
+              <div class="sidebar-item-title">{{ s.title || '未命名会话' }}</div>
+              <div class="sidebar-item-time">{{ fmtSessionTime(s.created_at) }}</div>
+            </div>
+            <el-dropdown trigger="click" @command="(cmd: string) => onSessionCommand(cmd, s)">
+              <el-button size="small" text :icon="MoreFilled" @click.stop />
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="rename">重命名会话</el-dropdown-item>
+                  <el-dropdown-item command="delete" divided>删除会话</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </div>
+        </template>
+        <el-empty v-else description="暂无历史对话" :image-size="60" />
+      </div>
+    </aside>
+
+    <!-- 重命名会话弹窗（预留接口，暂仅前端更新标题） -->
+    <el-dialog v-model="renameVisible" title="重命名会话" width="360px">
+      <el-input v-model="renameInput" placeholder="请输入新的会话名称" @keyup.enter="submitRename" />
+      <template #footer>
+        <el-button @click="renameVisible = false">取消</el-button>
+        <el-button type="primary" @click="submitRename">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <style scoped>
 .chat-page {
-  max-width: 860px;
+  max-width: 1200px;
   margin: 0 auto;
   /* 限制在视口内：100vh - 顶部导航栏高度 */
   height: calc(100vh - 56px);
   box-sizing: border-box;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  gap: 14px;
   padding: 12px 16px;
   width: 100%;
+}
+
+/* 左侧聊天主区域 */
+.chat-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 右侧历史对话侧边栏 */
+.chat-sidebar {
+  width: 270px;
+  flex-shrink: 0;
+  background: #fff;
+  border: 1px solid var(--el-color-primary-light-8);
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--el-color-primary-light-8);
+}
+
+.sidebar-title {
+  font-weight: 700;
+  color: #303133;
+  font-size: 14px;
+}
+
+.sidebar-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.sidebar-tip {
+  color: #909399;
+  font-size: 13px;
+  padding: 12px;
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s;
+}
+
+.sidebar-item:hover {
+  background: var(--el-color-primary-light-9);
+}
+
+.sidebar-item.active {
+  background: var(--el-color-primary-light-8);
+  border-color: var(--el-color-primary-light-6);
+}
+
+.sidebar-item-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.sidebar-item-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #303133;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-item-time {
+  font-size: 11px;
+  color: #909399;
+  margin-top: 2px;
 }
 
 .chat-card {
@@ -406,6 +647,67 @@ onActivated(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.chat-header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* 历史会话列表（v1.3） */
+.chat-history-panel {
+  border-bottom: 1px solid #e4e7ed;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 8px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.history-tip {
+  color: #909399;
+  font-size: 13px;
+  padding: 8px;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s;
+}
+
+.history-item:hover {
+  background: var(--el-color-primary-light-9);
+}
+
+.history-item.active {
+  background: var(--el-color-primary-light-8);
+  border-color: var(--el-color-primary-light-6);
+}
+
+.history-item-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.history-title {
+  font-size: 13px;
+  color: #303133;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-time {
+  font-size: 11px;
+  color: #c0c4cc;
+  margin-top: 2px;
 }
 
 .chat-title {

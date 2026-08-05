@@ -1,19 +1,27 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Calendar, Notebook } from '@element-plus/icons-vue'
-import { getRecords } from '@/api/records'
-import type { MealRecordItem } from '@/types/chat'
+import { computed, onMounted, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Calendar, Delete, Edit, Notebook, Plus } from '@element-plus/icons-vue'
+import {
+  getFoodRecords, createFoodRecord, updateFoodRecord, deleteFoodRecord,
+} from '@/api/records'
+import type { FoodRecordItem } from '@/types/chat'
 
 const MEAL_LABELS: Record<string, string> = {
-  breakfast: '早餐',
-  lunch: '午餐',
-  dinner: '晚餐',
-  other: '其他',
+  breakfast: '早餐', lunch: '午餐', dinner: '晚餐', other: '其他',
+  // 兼容 agent 聊天记录写入的中文餐次
+  早餐: '早餐', 午餐: '午餐', 晚餐: '晚餐', 其他: '其他',
 }
 
 const MEAL_OPTIONS = [
   { label: '全部', value: '' },
+  { label: '早餐', value: 'breakfast' },
+  { label: '午餐', value: 'lunch' },
+  { label: '晚餐', value: 'dinner' },
+  { label: '其他', value: 'other' },
+]
+
+const MEAL_CHOICES = [
   { label: '早餐', value: 'breakfast' },
   { label: '午餐', value: 'lunch' },
   { label: '晚餐', value: 'dinner' },
@@ -34,112 +42,41 @@ function defaultRange(): [string, string] {
 const loading = ref(false)
 // 第一级：日期范围（默认最近 30 天）
 const dateRange = ref<[string, string]>(defaultRange())
-// 第二级：餐次
+// 第二级：就餐类型
 const mealTime = ref('')
-const records = ref<MealRecordItem[]>([])
+const records = ref<FoodRecordItem[]>([])
 
-const MEAL_ORDER = ['breakfast', 'lunch', 'dinner', 'other']
-
-interface DayMeal {
-  meal_time: string
-  label: string
-  items: MealRecordItem[]
+// 营养折算：聊天记录若用户说明了实际克重（grams>0），按 实际/推荐克重 折算营养
+function nutScale(r: FoodRecordItem): number {
+  const grams = Number(r.grams) || 0
+  const rec = Number(r.recommended_grams) || 0
+  return grams > 0 && rec > 0 ? grams / rec : 1
 }
 
-interface DayGroup {
-  date: string
-  meals: DayMeal[]
+// 克重标签：没说明克重 → 显示推荐用量；说明了 → 显示实际克重
+function gramLabel(r: FoodRecordItem): string {
+  const grams = Number(r.grams) || 0
+  const rec = Number(r.recommended_grams) || 0
+  if (rec > 0) return grams > 0 ? `克重 ${grams}g` : `克重 推荐 ${rec}g`
+  return grams > 0 ? `克重 ${grams}g` : ''
 }
 
-// 按日期倒序 → 餐次分组（每个餐次下显示该餐记录的所有菜）
-const grouped = computed<DayGroup[]>(() => {
-  const dayMap = new Map<string, Map<string, MealRecordItem[]>>()
-  for (const r of records.value) {
-    if (!dayMap.has(r.date)) dayMap.set(r.date, new Map())
-    const mealMap = dayMap.get(r.date)!
-    if (!mealMap.has(r.meal_time)) mealMap.set(r.meal_time, [])
-    mealMap.get(r.meal_time)!.push(r)
-  }
-  return Array.from(dayMap.entries()).map(([date, mealMap]) => ({
-    date,
-    meals: Array.from(mealMap.entries())
-      .sort((a, b) => MEAL_ORDER.indexOf(a[0]) - MEAL_ORDER.indexOf(b[0]))
-      .map(([meal_time, items]) => ({ meal_time, label: mealLabel(meal_time), items })),
-  }))
-})
-
-// 日期折叠面板（默认展开最近一天）
-const expandedDays = ref<string[]>([])
-
-// 餐次菜品展开状态：`date::meal_time` -> boolean
-const mealExpanded = ref<Record<string, boolean>>({})
-
-function mealKey(date: string, meal: string): string {
-  return `${date}::${meal}`
-}
-
-function toggleMeal(date: string, meal: string): void {
-  const k = mealKey(date, meal)
-  mealExpanded.value[k] = !mealExpanded.value[k]
-}
-
-function isMealExpanded(date: string, meal: string): boolean {
-  return !!mealExpanded.value[mealKey(date, meal)]
-}
-
-function mealTotalKcal(meal: DayMeal): number {
-  return Math.round(meal.items.reduce((s, r) => s + (r.calories || 0), 0))
-}
-
-// 是否全部折叠（用于切换按钮文案）
-const allCollapsed = computed(() => {
-  const keys = grouped.value.flatMap((d) => d.meals.map((m) => mealKey(d.date, m.meal_time)))
-  return keys.length > 0 && keys.every((k) => !mealExpanded.value[k])
-})
-
-// 全部折叠 / 展开：当前全部折叠则展开全部，否则全部折叠（含日期面板）
-function toggleAll(): void {
-  const expand = allCollapsed.value
-  for (const day of grouped.value) {
-    for (const m of day.meals) {
-      mealExpanded.value[mealKey(day.date, m.meal_time)] = expand
-    }
-  }
-  if (expand) {
-    expandedDays.value = grouped.value.map((d) => d.date)
-  } else {
-    expandedDays.value = []
-  }
-}
-
-// 加载到记录后：默认全部折叠
-watch(
-  records,
-  (list) => {
-    if (!list.length) return
-    // 初始全部折叠
-    mealExpanded.value = {}
-    if (grouped.value.length) {
-      expandedDays.value = [grouped.value[0].date]
-    }
-  },
-  { immediate: true },
-)
-
+// 顶部统计：当前列表总热量 / 总蛋白质（按实际克重折算）
 const summary = computed(() => {
-  const total = records.value.length
-  const kcal = records.value.reduce((s, r) => s + (r.calories || 0) * r.portion, 0)
-  return { total, kcal: Math.round(kcal) }
+  const kcal = records.value.reduce((s, r) => s + (Number(r.calories) || 0) * nutScale(r), 0)
+  const protein = records.value.reduce((s, r) => s + (Number(r.protein) || 0) * nutScale(r), 0)
+  return { kcal: Math.round(kcal), protein: Math.round(protein) }
 })
 
 function mealLabel(m: string): string {
   return MEAL_LABELS[m] ?? '其他'
 }
 
+// 查询：按日期范围 + 就餐类型筛选，数据按日期倒序返回
 async function load(): Promise<void> {
   loading.value = true
   try {
-    records.value = await getRecords({
+    records.value = await getFoodRecords({
       start_date: dateRange.value[0],
       end_date: dateRange.value[1],
       meal_time: mealTime.value,
@@ -148,6 +85,114 @@ async function load(): Promise<void> {
     ElMessage.error('饮食记录加载失败，请确认后端已启动')
   } finally {
     loading.value = false
+  }
+}
+
+// ---- 新增 / 编辑弹窗 ----
+const dialogVisible = ref(false)
+const editingId = ref<number | null>(null)
+const form = ref({
+  date: fmtDate(new Date()),
+  meal_time: 'lunch',
+  name: '',
+  price: undefined as number | undefined,
+  calories: undefined as number | undefined,
+  protein: undefined as number | undefined,
+  fat: undefined as number | undefined,
+  carbs: undefined as number | undefined,
+  grams: undefined as number | undefined,
+  remark: '',
+})
+
+function openCreate(): void {
+  editingId.value = null
+  form.value = {
+    date: fmtDate(new Date()),
+    meal_time: 'lunch',
+    name: '',
+    price: undefined,
+    calories: undefined,
+    protein: undefined,
+    fat: undefined,
+    carbs: undefined,
+    grams: undefined,
+    remark: '',
+  }
+  dialogVisible.value = true
+}
+
+// 编辑：回填这条记录原有全部数据
+function openEdit(r: FoodRecordItem): void {
+  editingId.value = r.id
+  form.value = {
+    date: r.date,
+    meal_time: r.meal_time,
+    name: r.name,
+    price: Number(r.price) || undefined,
+    calories: Number(r.calories) || undefined,
+    protein: Number(r.protein) || undefined,
+    fat: Number(r.fat) || undefined,
+    carbs: Number(r.carbs) || undefined,
+    grams: Number(r.grams) || undefined,
+    remark: r.remark || '',
+  }
+  dialogVisible.value = true
+}
+
+// 提交（新增或编辑）：必填项校验，保存后关闭弹窗并刷新列表
+async function submit(): Promise<void> {
+  if (!form.value.date) {
+    ElMessage.warning('请选择就餐日期')
+    return
+  }
+  if (!form.value.name.trim()) {
+    ElMessage.warning('请输入菜品名称')
+    return
+  }
+  try {
+    const payload = {
+      date: form.value.date,
+      meal_time: form.value.meal_time,
+      name: form.value.name.trim(),
+      price: form.value.price ?? 0,
+      calories: form.value.calories ?? 0,
+      protein: form.value.protein ?? 0,
+      fat: form.value.fat ?? 0,
+      carbs: form.value.carbs ?? 0,
+      grams: form.value.grams ?? 0,
+      remark: form.value.remark,
+    }
+    if (editingId.value != null) {
+      await updateFoodRecord(editingId.value, payload)
+      ElMessage.success('记录已更新')
+    } else {
+      await createFoodRecord(payload)
+      ElMessage.success('记录已新增')
+    }
+    dialogVisible.value = false
+    await load()
+  } catch {
+    ElMessage.error('保存失败，请稍后重试')
+  }
+}
+
+// 删除：确认后删除并刷新
+async function removeRecord(r: FoodRecordItem): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      '确定要删除这条饮食记录吗？删除后不可恢复',
+      '删除确认',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  try {
+    await deleteFoodRecord(r.id)
+    ElMessage.success('已删除')
+    await load()
+  } catch {
+    ElMessage.error('删除失败，请稍后重试')
   }
 }
 
@@ -163,11 +208,16 @@ onMounted(load)
             <el-icon><Notebook /></el-icon>
             饮食记录
           </span>
-          <el-button size="small" type="primary" plain @click="load">刷新</el-button>
+          <div class="records-actions">
+            <el-button size="small" type="primary" plain @click="load">刷新</el-button>
+            <el-button size="small" type="primary" :icon="Plus" @click="openCreate">
+              新增记录
+            </el-button>
+          </div>
         </div>
       </template>
 
-      <!-- 第一级：日期范围选择 -->
+      <!-- 筛选控件 -->
       <div class="filter-row">
         <div class="filter-item">
           <span class="filter-label">
@@ -185,10 +235,8 @@ onMounted(load)
             @change="load"
           />
         </div>
-
-        <!-- 第二级：餐次选择 -->
         <div class="filter-item">
-          <span class="filter-label">餐次</span>
+          <span class="filter-label">就餐类型</span>
           <el-radio-group v-model="mealTime" size="default" @change="load">
             <el-radio-button v-for="opt in MEAL_OPTIONS" :key="opt.value" :value="opt.value">
               {{ opt.label }}
@@ -197,84 +245,104 @@ onMounted(load)
         </div>
       </div>
 
-      <!-- 汇总 -->
-      <div v-if="!loading && records.length" class="records-summary">
-        <span>
-          共 <b>{{ summary.total }}</b> 条记录，合计热量 <b>{{ summary.kcal }}</b> kcal
-        </span>
-        <el-button size="small" text type="primary" @click="toggleAll">
-          {{ allCollapsed ? '全部展开' : '全部折叠' }}
-        </el-button>
+      <!-- 统计区域 -->
+      <div v-if="records.length" class="records-summary">
+        <div class="stat-item">总摄入热量 <b>{{ summary.kcal }}</b> kcal</div>
+        <div class="stat-item">总蛋白质 <b>{{ summary.protein }}</b> g</div>
       </div>
 
-      <!-- 记录列表（按日期 → 餐次折叠面板，展开查看该餐所有菜） -->
+      <!-- 记录列表（按日期倒序） -->
       <div v-loading="loading" class="records-list">
         <template v-if="records.length">
-          <el-collapse v-model="expandedDays" class="record-collapse">
-            <el-collapse-item
-              v-for="day in grouped"
-              :key="day.date"
-              :name="day.date"
-              :title="day.date"
-            >
-              <div v-for="meal in day.meals" :key="meal.meal_time" class="record-meal">
-                <div class="record-meal-title">
-                  <span class="rm-badge" :class="meal.meal_time">{{ meal.label }}</span>
-                  <span class="rm-count">{{ meal.items.length }} 道菜</span>
-                  <span class="rm-kcal">
-                    {{ mealTotalKcal(meal) }} kcal
-                  </span>
-                  <el-button
-                    size="small"
-                    text
-                    type="primary"
-                    class="rm-toggle"
-                    @click="toggleMeal(day.date, meal.meal_time)"
-                  >
-                    {{ isMealExpanded(day.date, meal.meal_time) ? '收起' : '展开' }}
-                  </el-button>
-                </div>
-                <el-collapse-transition>
-                  <div v-if="isMealExpanded(day.date, meal.meal_time)" class="record-meal-items">
-                    <div v-for="r in meal.items" :key="r.id" class="record-item">
-                      <span class="ri-name">{{ r.dish_name }}</span>
-                      <span class="ri-cat">{{ r.category }}</span>
-                      <span class="ri-nut">
-                        <span v-if="r.calories">{{ r.calories }} kcal</span>
-                        <span v-if="r.protein">· 蛋白{{ r.protein }}g</span>
-                        <span v-if="r.carbs">· 碳水{{ r.carbs }}g</span>
-                        <span v-if="r.fat">· 脂肪{{ r.fat }}g</span>
-                        <span v-if="r.portion !== 1">· x{{ r.portion }}</span>
-                      </span>
-                      <span class="ri-price">¥{{ r.price }}</span>
-                    </div>
-                    <el-empty
-                      v-if="!meal.items.length"
-                      description="该餐次暂无记录"
-                      :image-size="60"
-                    />
-                  </div>
-                </el-collapse-transition>
-              </div>
-            </el-collapse-item>
-          </el-collapse>
+          <div v-for="r in records" :key="r.id" class="record-item">
+            <div class="ri-left">
+              <span class="ri-meal" :class="r.meal_time">{{ mealLabel(r.meal_time) }}</span>
+              <span class="ri-date">{{ r.date }}</span>
+              <span class="ri-name">{{ r.name }}</span>
+            </div>
+            <div class="ri-mid">
+              <span class="ri-metric price">¥{{ Number(r.price) || 0 }}</span>
+              <span class="ri-metric">{{ Math.round((Number(r.calories) || 0) * nutScale(r)) }} kcal</span>
+              <span class="ri-metric">蛋白 {{ Math.round((Number(r.protein) || 0) * nutScale(r)) }}g</span>
+              <span class="ri-metric">脂肪 {{ Math.round((Number(r.fat) || 0) * nutScale(r)) }}g</span>
+              <span class="ri-metric">碳水 {{ Math.round((Number(r.carbs) || 0) * nutScale(r)) }}g</span>
+              <span v-if="gramLabel(r)" class="ri-metric">{{ gramLabel(r) }}</span>
+            </div>
+            <div v-if="r.remark" class="ri-remark">{{ r.remark }}</div>
+            <div class="ri-ops">
+              <el-button size="small" :icon="Edit" @click="openEdit(r)">编辑</el-button>
+              <el-button size="small" type="danger" plain :icon="Delete" @click="removeRecord(r)">
+                删除
+              </el-button>
+            </div>
+          </div>
         </template>
-
-        <el-empty
-          v-else-if="!loading"
-          description="该范围内暂无饮食记录"
-        />
+        <el-empty v-else-if="!loading" description="暂无饮食记录" />
       </div>
     </el-card>
+
+    <!-- 新增 / 编辑弹窗 -->
+    <el-dialog
+      v-model="dialogVisible"
+      :title="editingId != null ? '编辑饮食记录' : '新增饮食记录'"
+      width="480px"
+      destroy-on-close
+    >
+      <el-form label-width="80px">
+        <el-form-item label="就餐日期" required>
+          <el-date-picker v-model="form.date" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="就餐类型" required>
+          <el-select v-model="form.meal_time" style="width: 100%">
+            <el-option v-for="m in MEAL_CHOICES" :key="m.value" :label="m.label" :value="m.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="菜品名称" required>
+          <el-input v-model="form.name" placeholder="请输入菜品名称" />
+        </el-form-item>
+        <el-form-item label="价格">
+          <el-input-number v-model="form.price" :min="0" :max="1000" :precision="2" :step="1" style="width: 180px" />
+          <span class="form-unit">元</span>
+        </el-form-item>
+        <el-form-item label="热量">
+          <el-input-number v-model="form.calories" :min="0" :max="5000" style="width: 180px" />
+          <span class="form-unit">kcal</span>
+        </el-form-item>
+        <el-form-item label="蛋白质">
+          <el-input-number v-model="form.protein" :min="0" :max="500" :precision="1" style="width: 180px" />
+          <span class="form-unit">g</span>
+        </el-form-item>
+        <el-form-item label="脂肪">
+          <el-input-number v-model="form.fat" :min="0" :max="500" :precision="1" style="width: 180px" />
+          <span class="form-unit">g</span>
+        </el-form-item>
+        <el-form-item label="碳水">
+          <el-input-number v-model="form.carbs" :min="0" :max="500" :precision="1" style="width: 180px" />
+          <span class="form-unit">g</span>
+        </el-form-item>
+        <el-form-item label="克重">
+          <el-input-number v-model="form.grams" :min="0" :max="5000" :precision="1" style="width: 180px" />
+          <span class="form-unit">g</span>
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="form.remark" type="textarea" :rows="2" placeholder="选填" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="submit">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <style scoped>
 .records-page {
   max-width: 860px;
+  width: 100%;
+  box-sizing: border-box;
   margin: 0 auto;
   padding: 16px;
-  width: 100%;
 }
 
 .records-card {
@@ -285,6 +353,11 @@ onMounted(load)
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.records-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .records-title {
@@ -323,100 +396,32 @@ onMounted(load)
   white-space: nowrap;
 }
 
+/* 统计区 */
 .records-summary {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 24px;
   font-size: 13px;
   color: #606266;
   margin-bottom: 12px;
 }
 
-.records-summary b {
+.stat-item b {
   color: var(--el-color-primary);
+  font-size: 16px;
+  margin: 0 2px;
 }
 
-/* 记录列表 */
+/* 列表 */
 .records-list {
   min-height: 120px;
-}
-
-.record-collapse :deep(.el-collapse-item__header) {
-  font-weight: 600;
-  font-size: 14px;
-  color: #303133;
-}
-
-.record-collapse :deep(.el-collapse-item__content) {
-  padding-bottom: 8px;
-}
-
-.record-meal {
-  margin-bottom: 12px;
-}
-
-.record-meal-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-
-.rm-kcal {
-  margin-left: auto;
-  font-size: 12px;
-  color: #909399;
-  white-space: nowrap;
-}
-
-.rm-toggle {
-  padding: 0 6px;
-  flex-shrink: 0;
-}
-
-.rm-badge {
-  padding: 2px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 600;
-  background: var(--el-color-primary-light-9);
-  color: var(--el-color-primary);
-  white-space: nowrap;
-}
-
-/* 午餐：红色，与早餐（绿）、晚餐（橙）明显区分 */
-.rm-badge.lunch {
-  background: #fdecec;
-  color: #f56c6c;
-}
-
-.rm-badge.dinner {
-  background: #fdf3e7;
-  color: #e6a23c;
-}
-
-.rm-badge.other {
-  background: #f3f4f6;
-  color: #909399;
-}
-
-.rm-count {
-  color: #909399;
-  font-size: 12px;
-}
-
-.record-meal-items {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
 }
 
 .record-item {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
   padding: 10px 12px;
+  margin-bottom: 8px;
   border: 1px solid var(--el-color-primary-light-8);
   border-radius: 10px;
   background: #fff;
@@ -424,25 +429,80 @@ onMounted(load)
   flex-wrap: wrap;
 }
 
+.ri-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ri-meal {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+  white-space: nowrap;
+}
+
+.ri-meal.lunch {
+  background: #fdecec;
+  color: #f56c6c;
+}
+
+.ri-meal.dinner {
+  background: #fdf3e7;
+  color: #e6a23c;
+}
+
+.ri-meal.other {
+  background: #f3f4f6;
+  color: #909399;
+}
+
+.ri-date {
+  color: #909399;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .ri-name {
   font-weight: 600;
   color: #303133;
 }
 
-.ri-cat {
-  color: #909399;
+.ri-mid {
+  display: flex;
+  gap: 12px;
   font-size: 12px;
-}
-
-.ri-nut {
   color: #606266;
-  font-size: 12px;
+  flex-wrap: wrap;
 }
 
-.ri-price {
+.ri-metric.price {
   color: #e6a23c;
   font-weight: 600;
-  margin-left: auto;
+}
+
+.ri-remark {
+  font-size: 12px;
+  color: #909399;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ri-ops {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.form-unit {
+  margin-left: 6px;
+  color: #909399;
+  font-size: 12px;
 }
 </style>
