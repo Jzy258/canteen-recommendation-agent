@@ -15,7 +15,7 @@ _bearer = HTTPBearer(auto_error=False)
 def _unauthorized() -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Not authenticated",
+        detail="未登录或登录已过期",
         headers={"WWW-Authenticate": "Bearer"},
     )
 
@@ -61,6 +61,6 @@ def require_admin(user: dict = Depends(get_current_user)) -> dict:
     if user.get("role") != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin privileges required",
+            detail="需要管理员权限",
         )
     return user

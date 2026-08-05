@@ -1,6 +1,15 @@
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import { User } from '@element-plus/icons-vue'
 import ProfileForm from '@/components/ProfileForm.vue'
+import { useProfileStore } from '@/stores/profile'
+
+const profileStore = useProfileStore()
+
+// 进入偏好页时从后端加载当前用户画像（按 user_id 隔离）
+onMounted(() => {
+  profileStore.load()
+})
 </script>
 
 <template>

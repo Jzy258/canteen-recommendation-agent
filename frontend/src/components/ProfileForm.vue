@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Aim, FirstAidKit, Location, Sugar, Wallet } from '@element-plus/icons-vue'
 import type { UserProfile } from '@/types/chat'
@@ -15,6 +15,18 @@ const region = ref(profileStore.region)
 const locating = ref(false)
 
 const GOALS = ['高蛋白', '增肌', '控油', '控糖', '减脂']
+
+// 后端画像加载完成 / 重置后，同步到表单
+watch(
+  () => profileStore.profile,
+  (p) => {
+    budget.value = p.budget
+    flavor.value = p.flavor_preferences
+    healthGoal.value = p.health_goals
+    region.value = p.region || ''
+  },
+  { deep: true },
+)
 
 async function locate(): Promise<void> {
   locating.value = true
@@ -33,14 +45,14 @@ async function locate(): Promise<void> {
   }
 }
 
-function save(): void {
+async function save(): Promise<void> {
   const profile: UserProfile = {
     budget: budget.value,
     flavor_preferences: flavor.value,
     health_goals: healthGoal.value,
     region: region.value,
   }
-  profileStore.save(profile)
+  await profileStore.save(profile)
   ElMessage.success('偏好已保存')
 }
 

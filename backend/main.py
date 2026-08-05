@@ -133,11 +133,46 @@ def records(start_date: str = "", end_date: str = "", meal_time: str = "",
                                          user_id=uid)
 
 
+class ProfileUpdateRequest(BaseModel):
+    budget: float | None = None
+    flavor_preferences: str | None = None
+    health_goals: str | None = None
+
+
+@app.get("/profile")
+def get_profile(user: dict | None = Depends(get_optional_user)):
+    """获取当前用户偏好设置（登录用户按 user_id 隔离；游客返回全局/最近一条）。"""
+    from db import get_db
+    uid = user["id"] if user else None
+    p = get_db().get_user_profile(user_id=uid) or {}
+    return {
+        "budget": p.get("budget", 20),
+        "flavor_preferences": p.get("flavor_preferences", ""),
+        "health_goals": p.get("health_goals", ""),
+    }
+
+
+@app.put("/profile")
+def update_profile(req: ProfileUpdateRequest,
+                   user: dict | None = Depends(get_optional_user)):
+    """保存当前用户偏好设置（按 user_id 隔离；游客存为无主画像）。"""
+    from db import get_db
+    uid = user["id"] if user else None
+    db = get_db()
+    db.upsert_user_profile(
+        budget=req.budget if req.budget is not None else 0,
+        flavor_preferences=req.flavor_preferences or "",
+        health_goals=req.health_goals or "",
+        user_id=uid,
+    )
+    return {"ok": True}
+
+
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
     if not req.message or not req.message.strip():
         logger.warning("空消息被拒绝")
-        raise HTTPException(status_code=400, detail="Message cannot be empty")
+        raise HTTPException(status_code=400, detail="消息不能为空")
 
     session_id = req.session_id or str(uuid.uuid4())
     history = session_store.get(session_id)
@@ -271,7 +306,7 @@ def _stream_reply(session_id: str, message: str):
 def chat_stream(req: ChatRequest):
     """流式对话：SSE 输出，先 session 元数据，再 content 增量，最后 done。"""
     if not req.message or not req.message.strip():
-        raise HTTPException(status_code=400, detail="Message cannot be empty")
+        raise HTTPException(status_code=400, detail="消息不能为空")
     session_id = req.session_id or str(uuid.uuid4())
     return _stream_reply(session_id, req.message)
 

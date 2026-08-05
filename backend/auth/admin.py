@@ -67,15 +67,15 @@ def update_user(user_id: int, req: UserUpdateRequest,
     db = get_db()
     user = db.get_user_by_id(user_id)
     if user is None:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="用户不存在")
     is_self = user_id == me["id"]
     if req.role is not None and req.role != user["role"]:
         if is_self:
-            raise HTTPException(status_code=400, detail="Cannot change your own role")
+            raise HTTPException(status_code=400, detail="不能修改自己的角色")
         db.set_user_role(user_id, req.role)
     if req.status is not None and req.status != user["status"]:
         if is_self:
-            raise HTTPException(status_code=400, detail="Cannot disable your own account")
+            raise HTTPException(status_code=400, detail="不能禁用自己的账号")
         db.set_user_status(user_id, req.status)
     if req.display_name is not None and req.display_name.strip() != user.get("display_name"):
         db.set_user_display_name(user_id, req.display_name.strip())
@@ -92,7 +92,7 @@ def reset_password(user_id: int, req: ResetPasswordRequest):
     """管理员重置任意用户密码。"""
     db = get_db()
     if db.get_user_by_id(user_id) is None:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="用户不存在")
     db.change_user_password(user_id, hash_password(req.new_password))
     return {"ok": True}
 
@@ -144,11 +144,11 @@ def create_dish(req: DishCreateRequest):
     """新增菜品。"""
     db = get_db()
     if db.get_dish_by_name(req.name.strip()):
-        raise HTTPException(status_code=409, detail="Dish name already exists")
+        raise HTTPException(status_code=409, detail="菜品名称已存在")
     try:
         dish_id = db.add_dish(req.model_dump())
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to create dish: {e}")
+        raise HTTPException(status_code=400, detail=f"创建菜品失败: {e}")
     return {"id": dish_id}
 
 
@@ -157,12 +157,12 @@ def update_dish(dish_id: int, req: DishUpdateRequest):
     """更新菜品（仅更新传入字段）。"""
     db = get_db()
     if db.get_dish_by_id(dish_id) is None:
-        raise HTTPException(status_code=404, detail="Dish not found")
+        raise HTTPException(status_code=404, detail="菜品不存在")
     data = {k: v for k, v in req.model_dump().items() if v is not None}
     try:
         db.update_dish(dish_id, data)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to update dish: {e}")
+        raise HTTPException(status_code=400, detail=f"更新菜品失败: {e}")
     return {"ok": True}
 
 
@@ -171,7 +171,7 @@ def delete_dish(dish_id: int):
     """删除菜品（关联 menu_item 级联删除）。"""
     db = get_db()
     if db.get_dish_by_id(dish_id) is None:
-        raise HTTPException(status_code=404, detail="Dish not found")
+        raise HTTPException(status_code=404, detail="菜品不存在")
     db.delete_dish(dish_id)
     return {"ok": True}
 
@@ -198,5 +198,5 @@ def delete_menu(date: str, meal_time: str):
     """删除某日期餐次的菜单。"""
     db = get_db()
     if not db.delete_menu(date, meal_time):
-        raise HTTPException(status_code=404, detail="Menu not found")
+        raise HTTPException(status_code=404, detail="菜单不存在")
     return {"ok": True}
