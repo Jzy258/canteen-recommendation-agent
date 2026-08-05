@@ -4,7 +4,8 @@ import os
 import uuid
 from dotenv import load_dotenv
 
-load_dotenv()
+# 显式加载 backend/.env（基于 __file__，消除 cwd 依赖），避免从根目录启动时密钥缺失
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware

@@ -21,8 +21,9 @@ from urllib.parse import quote
 
 from dotenv import load_dotenv
 
-# 显式加载项目根目录 .env，避免 find_dotenv 因 backend/ 下存在 .env 而加载错位置
-load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
+# 加载 backend/.env（backend/mcp/../.env），确保独立运行（测试/MCP/从根启动后端）
+# 也能读到 WEATHER_API_KEY 等配置
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 # 城市名 → 高德 adcode 兜底映射（优先用地理编码接口动态解析）
 CITY_ADCODE = {
@@ -101,6 +102,12 @@ def get_weather(city: str = "") -> dict:
     """
     if not city:
         city = auto_locate_city() or "北京"
+    # 归一化城市名（"南京市"→"南京"），保证与内置映射表/天气接口一致
+    try:
+        from mcp.location import normalize_city
+        city = normalize_city(city) or city
+    except Exception:
+        pass
 
     if os.getenv("WEATHER_API_KEY"):
         try:

@@ -18,7 +18,8 @@ from urllib.parse import quote
 
 from dotenv import load_dotenv
 
-load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
+# 加载 backend/.env（backend/mcp/../.env），确保独立运行也能读到 WEATHER_API_KEY
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 # 定位缓存文件
 _BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -29,6 +30,21 @@ _loc_lock = threading.Lock()
 
 # 测试注入用
 loc_override: dict | None = None
+
+
+def normalize_city(city: str) -> str:
+    """归一化城市名：去掉行政后缀（市/省/特别行政区），便于匹配内置城市映射表。
+    如："南京市"→"南京"、"北京市"→"北京"、"江苏省"→"江苏"。"""
+    if not city:
+        return city
+    s = city.strip()
+    if s.endswith("特别行政区") and len(s) > 5:
+        return s[:-5]  # 香港/澳门特别行政区
+    if s.endswith("市") and len(s) > 1:
+        return s[:-1]
+    if s.endswith("省") and len(s) > 1:
+        return s[:-1]
+    return s
 
 
 def _load_cache() -> dict[str, dict]:
@@ -68,7 +84,10 @@ def locate_city(ip: str = "") -> dict:
     cache_key = ip or "default"
     with _loc_lock:
         if cache_key in _loc_cache:
-            return dict(_loc_cache[cache_key])
+            cached = dict(_loc_cache[cache_key])
+            cached["city"] = normalize_city(cached.get("city", ""))
+            cached["province"] = normalize_city(cached.get("province", ""))
+            return cached
 
     base = os.getenv("IP_BASE_URL", "https://restapi.amap.com/v3/ip")
     url = f"{base}?key={key}&output=JSON"
@@ -85,9 +104,9 @@ def locate_city(ip: str = "") -> dict:
         if not city:
             return {}
         result = {
-            "city": city,
+            "city": normalize_city(city),
             "adcode": adcode,
-            "province": data.get("province", ""),
+            "province": normalize_city(data.get("province", "")),
         }
         with _loc_lock:
             _loc_cache[cache_key] = result
