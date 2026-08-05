@@ -1,3 +1,5 @@
+from datetime import date, timedelta
+
 from langchain_core.tools import tool
 
 
@@ -6,12 +8,35 @@ def _db():
     return get_db()
 
 
+def _normalize_date(date_str: str) -> str:
+    """将相对日期（today/今天/yesterday/昨天/前天/明天）规范化为真实 ISO 日期。
+
+    防止 LLM 把"今天/昨天"直接当作 date 传入（如 date='today'），
+    否则该记录无法被按日期范围的查询命中，导致记录页看不到。
+    """
+    s = (date_str or "").strip().lower()
+    today = date.today()
+    mapping = {
+        "today": today,
+        "今天": today,
+        "今日": today,
+        "yesterday": today - timedelta(days=1),
+        "昨天": today - timedelta(days=1),
+        "前天": today - timedelta(days=2),
+        "tomorrow": today + timedelta(days=1),
+        "明天": today + timedelta(days=1),
+    }
+    return mapping[s].isoformat() if s in mapping else date_str
+
+
 @tool
 def record_meal(date: str, meal_time: str, dish_id: int, portion: float = 1.0,
                 grams: float | None = None) -> int:
     """记录一餐摄入（待确认状态），返回记录 id。
+    date：日期（YYYY-MM-DD），也支持 today/今天/昨天 等相对写法。
     grams：实际摄入克重（可选）。提供时按克重折算营养；不提供则按 portion 份数。"""
-    return _db().add_meal_record(date, meal_time, dish_id, portion, grams=grams)
+    return _db().add_meal_record(_normalize_date(date), meal_time, dish_id,
+                                 portion, grams=grams)
 
 
 @tool

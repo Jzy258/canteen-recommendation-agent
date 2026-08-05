@@ -38,14 +38,34 @@ const dateRange = ref<[string, string]>(defaultRange())
 const mealTime = ref('')
 const records = ref<MealRecordItem[]>([])
 
-// 按日期倒序分组
-const grouped = computed(() => {
-  const map = new Map<string, MealRecordItem[]>()
+const MEAL_ORDER = ['breakfast', 'lunch', 'dinner', 'other']
+
+interface DayMeal {
+  meal_time: string
+  label: string
+  items: MealRecordItem[]
+}
+
+interface DayGroup {
+  date: string
+  meals: DayMeal[]
+}
+
+// 按日期倒序 → 餐次分组（每个餐次下显示该餐记录的所有菜）
+const grouped = computed<DayGroup[]>(() => {
+  const dayMap = new Map<string, Map<string, MealRecordItem[]>>()
   for (const r of records.value) {
-    if (!map.has(r.date)) map.set(r.date, [])
-    map.get(r.date)!.push(r)
+    if (!dayMap.has(r.date)) dayMap.set(r.date, new Map())
+    const mealMap = dayMap.get(r.date)!
+    if (!mealMap.has(r.meal_time)) mealMap.set(r.meal_time, [])
+    mealMap.get(r.meal_time)!.push(r)
   }
-  return Array.from(map.entries())
+  return Array.from(dayMap.entries()).map(([date, mealMap]) => ({
+    date,
+    meals: Array.from(mealMap.entries())
+      .sort((a, b) => MEAL_ORDER.indexOf(a[0]) - MEAL_ORDER.indexOf(b[0]))
+      .map(([meal_time, items]) => ({ meal_time, label: mealLabel(meal_time), items })),
+  }))
 })
 
 const summary = computed(() => {
@@ -124,24 +144,29 @@ onMounted(load)
         共 <b>{{ summary.total }}</b> 条记录，合计热量 <b>{{ summary.kcal }}</b> kcal
       </div>
 
-      <!-- 记录列表（按日期分组） -->
+      <!-- 记录列表（按日期 → 餐次分组，每个餐次显示该餐所有菜） -->
       <div v-loading="loading" class="records-list">
         <template v-if="records.length">
-          <section v-for="[date, items] in grouped" :key="date" class="record-day">
-            <div class="record-day-title">{{ date }}</div>
-            <div class="record-day-items">
-              <div v-for="r in items" :key="r.id" class="record-item">
-                <span class="ri-meal" :class="r.meal_time">{{ mealLabel(r.meal_time) }}</span>
-                <span class="ri-name">{{ r.dish_name }}</span>
-                <span class="ri-cat">{{ r.category }}</span>
-                <span class="ri-nut">
-                  <span v-if="r.calories">{{ r.calories }} kcal</span>
-                  <span v-if="r.protein">· 蛋白{{ r.protein }}g</span>
-                  <span v-if="r.carbs">· 碳水{{ r.carbs }}g</span>
-                  <span v-if="r.fat">· 脂肪{{ r.fat }}g</span>
-                  <span v-if="r.portion !== 1">· x{{ r.portion }}</span>
-                </span>
-                <span class="ri-price">¥{{ r.price }}</span>
+          <section v-for="day in grouped" :key="day.date" class="record-day">
+            <div class="record-day-title">{{ day.date }}</div>
+            <div v-for="meal in day.meals" :key="meal.meal_time" class="record-meal">
+              <div class="record-meal-title">
+                <span class="rm-badge" :class="meal.meal_time">{{ meal.label }}</span>
+                <span class="rm-count">{{ meal.items.length }} 道菜</span>
+              </div>
+              <div class="record-meal-items">
+                <div v-for="r in meal.items" :key="r.id" class="record-item">
+                  <span class="ri-name">{{ r.dish_name }}</span>
+                  <span class="ri-cat">{{ r.category }}</span>
+                  <span class="ri-nut">
+                    <span v-if="r.calories">{{ r.calories }} kcal</span>
+                    <span v-if="r.protein">· 蛋白{{ r.protein }}g</span>
+                    <span v-if="r.carbs">· 碳水{{ r.carbs }}g</span>
+                    <span v-if="r.fat">· 脂肪{{ r.fat }}g</span>
+                    <span v-if="r.portion !== 1">· x{{ r.portion }}</span>
+                  </span>
+                  <span class="ri-price">¥{{ r.price }}</span>
+                </div>
               </div>
             </div>
           </section>
@@ -238,10 +263,52 @@ onMounted(load)
   padding-left: 8px;
 }
 
-.record-day-items {
+.record-meal {
+  margin-bottom: 12px;
+}
+
+.record-meal-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.rm-badge {
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+  white-space: nowrap;
+}
+
+/* 午餐：红色，与早餐（绿）、晚餐（橙）明显区分 */
+.rm-badge.lunch {
+  background: #fdecec;
+  color: #f56c6c;
+}
+
+.rm-badge.dinner {
+  background: #fdf3e7;
+  color: #e6a23c;
+}
+
+.rm-badge.other {
+  background: #f3f4f6;
+  color: #909399;
+}
+
+.rm-count {
+  color: #909399;
+  font-size: 12px;
+}
+
+.record-meal-items {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .record-item {
@@ -254,31 +321,6 @@ onMounted(load)
   background: #fff;
   font-size: 13px;
   flex-wrap: wrap;
-}
-
-.ri-meal {
-  padding: 1px 8px;
-  border-radius: 999px;
-  font-size: 12px;
-  background: var(--el-color-primary-light-9);
-  color: var(--el-color-primary);
-  white-space: nowrap;
-}
-
-/* 午餐：红色，与早餐（绿）、晚餐（橙）明显区分 */
-.ri-meal.lunch {
-  background: #fdecec;
-  color: #f56c6c;
-}
-
-.ri-meal.dinner {
-  background: #fdf3e7;
-  color: #e6a23c;
-}
-
-.ri-meal.other {
-  background: #f3f4f6;
-  color: #909399;
 }
 
 .ri-name {
