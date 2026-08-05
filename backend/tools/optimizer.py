@@ -231,22 +231,26 @@ def _empty_result(reason: str) -> dict:
 
 @tool
 def optimize_meal_tool(budget: float, calorie_limit: float,
-                       preferences: str = "") -> dict:
+                       preferences: str = "", dietary_restrictions: str = "") -> dict:
     """在预算与热量上限内，用组合算法求最优一餐搭配（荤素搭配合理）。
     Args:
         budget: 预算（元/餐）
         calorie_limit: 热量上限（kcal）
         preferences: 口味偏好（逗号分隔），可选；不传时使用已保存的用户画像。
+        dietary_restrictions: 忌口/过敏（逗号分隔），可选；不传时使用已保存的用户画像。
     """
     from db import get_db
+    from tools.scoring import filter_by_restrictions
 
     db = get_db()
     saved = db.get_user_profile() or {}
     effective_prefs = preferences if preferences else saved.get("flavor_preferences", "")
+    effective_restr = dietary_restrictions if dietary_restrictions else saved.get("dietary_restrictions", "")
     user_profile = {
         "budget": float(budget),
         "flavor_preferences": effective_prefs,
         "health_goals": saved.get("health_goals", ""),
+        "dietary_restrictions": effective_restr,
     }
-    dishes = db.get_all_dishes()
+    dishes = filter_by_restrictions(db.get_all_dishes(), effective_restr)
     return optimize_meal(dishes, budget, calorie_limit, user_profile=user_profile)

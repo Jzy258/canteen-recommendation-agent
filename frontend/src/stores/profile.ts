@@ -5,11 +5,12 @@ const DEFAULT_PROFILE: UserProfile = {
   budget: 20,
   flavor_preferences: '',
   health_goals: '',
+  dietary_restrictions: '',
   region: '',
 }
 
 /**
- * 用户偏好与设置（预算 / 口味 / 健康目标 / 所在地区）。
+ * 用户偏好与设置（预算 / 口味 / 忌口 / 健康目标 / 所在地区）。
  * 持久化到 localStorage（key: canteen.profile），并派生注入对话的话术前缀。
  */
 export const useProfileStore = defineStore('profile', {
@@ -17,6 +18,7 @@ export const useProfileStore = defineStore('profile', {
     budget: DEFAULT_PROFILE.budget,
     flavor_preferences: '',
     health_goals: '',
+    dietary_restrictions: '',
     region: '',
     /** 用户是否显式保存过偏好；未保存不注入对话（企业级语义） */
     configured: false,
@@ -26,6 +28,7 @@ export const useProfileStore = defineStore('profile', {
       budget: s.budget,
       flavor_preferences: s.flavor_preferences,
       health_goals: s.health_goals,
+      dietary_restrictions: s.dietary_restrictions,
       region: s.region,
     }),
     /** 以自然语言注入对话的前缀，如"（用户偏好：预算20元，所在城市北京）" */
@@ -34,6 +37,7 @@ export const useProfileStore = defineStore('profile', {
       const parts: string[] = []
       if (s.budget > 0) parts.push(`预算${s.budget}元`)
       if (s.flavor_preferences.trim()) parts.push(`口味偏好${s.flavor_preferences.trim()}`)
+      if (s.dietary_restrictions.trim()) parts.push(`忌口${s.dietary_restrictions.trim()}`)
       if (s.health_goals) parts.push(`目标${s.health_goals}`)
       if (s.region.trim()) parts.push(`所在城市${s.region.trim()}`)
       return parts.length ? `（用户偏好：${parts.join('，')}）` : ''
@@ -44,6 +48,7 @@ export const useProfileStore = defineStore('profile', {
       this.budget = p.budget
       this.flavor_preferences = p.flavor_preferences
       this.health_goals = p.health_goals
+      this.dietary_restrictions = p.dietary_restrictions || ''
       this.region = p.region || ''
       this.configured = true
     },
@@ -51,6 +56,7 @@ export const useProfileStore = defineStore('profile', {
       this.budget = DEFAULT_PROFILE.budget
       this.flavor_preferences = ''
       this.health_goals = ''
+      this.dietary_restrictions = ''
       this.region = ''
       this.configured = false
     },

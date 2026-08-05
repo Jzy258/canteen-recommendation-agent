@@ -85,6 +85,8 @@ export interface UserProfile {
   budget: number
   flavor_preferences: string
   health_goals: string
+  /** 忌口/过敏，逗号分隔（如：不吃辣,香菜,猪肉） */
+  dietary_restrictions: string
   /** 所在地区（城市），用于天气推荐 */
   region?: string
 }

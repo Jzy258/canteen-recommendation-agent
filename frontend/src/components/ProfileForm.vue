@@ -1,44 +1,55 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Aim, FirstAidKit, Location, Sugar, Wallet } from '@element-plus/icons-vue'
+import { FirstAidKit, NoSmoking, Sugar, Wallet } from '@element-plus/icons-vue'
 import type { UserProfile } from '@/types/chat'
 import { useProfileStore } from '@/stores/profile'
-import { getLocation } from '@/api/location'
 
 const profileStore = useProfileStore()
 
 const budget = ref(profileStore.budget)
 const flavor = ref(profileStore.flavor_preferences)
 const healthGoal = ref(profileStore.health_goals)
-const region = ref(profileStore.region)
-const locating = ref(false)
 
 const GOALS = ['高蛋白', '增肌', '控油', '控糖', '减脂']
 
-async function locate(): Promise<void> {
-  locating.value = true
-  try {
-    const { city } = await getLocation()
-    if (city) {
-      region.value = city
-      ElMessage.success(`已定位到：${city}`)
-    } else {
-      ElMessage.warning('定位失败，请手动输入所在城市')
-    }
-  } catch {
-    ElMessage.warning('定位失败，请手动输入所在城市')
-  } finally {
-    locating.value = false
-  }
-}
+// 常见忌口项（多选）+ 自定义补充
+const COMMON_RESTRICTIONS = [
+  '不吃辣',
+  '不吃香菜',
+  '不吃葱姜蒜',
+  '不吃猪肉',
+  '不吃牛羊肉',
+  '清真',
+  '素食',
+  '海鲜过敏',
+  '花生过敏',
+  '乳糖不耐',
+]
+
+// 从持久化串加载：常见项进多选，其余进自定义补充
+const persistedRestrictions = (profileStore.dietary_restrictions || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean)
+const restrictions = ref<string[]>(
+  persistedRestrictions.filter((r) => COMMON_RESTRICTIONS.includes(r)),
+)
+const customRestriction = ref(
+  persistedRestrictions.filter((r) => !COMMON_RESTRICTIONS.includes(r)).join(','),
+)
 
 function save(): void {
+  const custom = customRestriction.value
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const all = [...new Set([...restrictions.value, ...custom])]
   const profile: UserProfile = {
     budget: budget.value,
     flavor_preferences: flavor.value,
     health_goals: healthGoal.value,
-    region: region.value,
+    dietary_restrictions: all.join(','),
   }
   profileStore.save(profile)
   ElMessage.success('偏好已保存')
@@ -49,7 +60,8 @@ function reset(): void {
   budget.value = profileStore.budget
   flavor.value = ''
   healthGoal.value = ''
-  region.value = ''
+  restrictions.value = []
+  customRestriction.value = ''
   ElMessage.info('已恢复默认')
 }
 
@@ -88,17 +100,17 @@ defineExpose({ save })
     </div>
 
     <div class="pf-section">
-      <div class="pf-title"><el-icon><Location /></el-icon>所在地区</div>
-      <div class="pf-body region-row">
+      <div class="pf-title"><el-icon><NoSmoking /></el-icon>忌口 / 过敏</div>
+      <div class="pf-body">
+        <el-checkbox-group v-model="restrictions" class="pf-restrictions">
+          <el-checkbox v-for="r in COMMON_RESTRICTIONS" :key="r" :label="r" />
+        </el-checkbox-group>
         <el-input
-          v-model="region"
-          placeholder="如：北京 / 上海（用于天气推荐）"
+          v-model="customRestriction"
+          placeholder="其他忌口（如：不吃茄子、鸡蛋过敏），逗号分隔"
           clearable
+          class="pf-restriction-input"
         />
-        <el-button :loading="locating" @click="locate">
-          <el-icon style="margin-right: 4px"><Aim /></el-icon>
-          使用定位
-        </el-button>
       </div>
     </div>
 
@@ -154,14 +166,15 @@ defineExpose({ save })
   white-space: nowrap;
 }
 
-.region-row {
+.pf-restrictions {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-bottom: 12px;
 }
 
-.region-row .el-input {
-  flex: 1;
+.pf-restriction-input {
+  max-width: 420px;
 }
 
 .pf-actions {

@@ -15,19 +15,21 @@ from tools.meal_time import current_meal, meal_label, current_meal_label
 
 @tool
 def recommend_for_meal(budget: float = 20, preferences: str = "",
-                       health_goals: str = "", top_k: int = 5) -> dict:
+                       health_goals: str = "", dietary_restrictions: str = "",
+                       top_k: int = 5) -> dict:
     """根据当前时间自动推荐当前餐次（早/午/晚餐）的菜品。
     适合用户问"现在吃什么"、"推荐一餐"等。
     Args:
         budget: 预算（元/餐），默认 20。
         preferences: 口味偏好，逗号分隔（如 "辣,清淡"）。
         health_goals: 营养目标（高蛋白/控油/控糖/增肌/减脂），可空。
+        dietary_restrictions: 忌口/过敏，逗号分隔（如 "不吃辣,猪肉"），可空。
         top_k: 返回数量，默认 5。
     Returns:
         dict: {meal, meal_label, dishes:[...], source}
     """
     from db import get_db
-    from tools.scoring import score_dishes
+    from tools.scoring import filter_by_restrictions, score_dishes
 
     meal = current_meal()
     label = meal_label(meal)
@@ -52,16 +54,19 @@ def recommend_for_meal(budget: float = 20, preferences: str = "",
         budget_f = float(saved.get("budget") or 20)
     effective_prefs = preferences if preferences else saved.get("flavor_preferences", "")
     effective_goal = health_goals if health_goals else saved.get("health_goals", "")
+    effective_restr = dietary_restrictions if dietary_restrictions else saved.get("dietary_restrictions", "")
 
     if not top_k or top_k < 0:
         top_k = 5
 
-    # 预算硬约束 + 评分
+    # 预算硬约束 + 忌口硬约束 + 评分
     in_budget = [d for d in candidates if float(d["price"]) <= budget_f]
+    in_budget = filter_by_restrictions(in_budget, effective_restr)
     user_profile = {
         "budget": budget_f,
         "flavor_preferences": effective_prefs,
         "health_goals": effective_goal,
+        "dietary_restrictions": effective_restr,
     }
     scored = score_dishes(in_budget, user_profile, budget=budget_f)
     top = scored[:top_k]

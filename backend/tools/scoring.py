@@ -171,6 +171,60 @@ def _split(text: str) -> list[str]:
 
 
 # =============================================================================
+# 忌口过滤（启发式）
+# 菜品暂无配料/过敏原字段，故基于「菜名 + 口味标签 + 类别」做启发式匹配，
+# 命中即视为忌口并剔除。后续给 dishes 增加配料列后可升级为精确过滤。
+# =============================================================================
+
+
+def _is_restricted(dish: dict, restriction: str) -> bool:
+    """判断一道菜是否命中一条忌口。
+
+    规则：
+    - 素食/不吃肉 → 排除类别为「荤菜」
+    - 清真/不吃猪肉/猪肉 → 排除菜名含"猪"，或含"肉"但非牛羊鱼鸡鸭虾兔
+    - 口味类（辣/麻辣/酸辣）→ 排除 flavor_tags 命中
+    - 其他关键词（如 香菜/花生/茄子）→ 菜名或 flavor_tags 命中
+    """
+    if not dish or not restriction:
+        return False
+    name = str(dish.get("name", ""))
+    tags = _split(dish.get("flavor_tags", ""))
+    category = str(dish.get("category", ""))
+    r = str(restriction).strip()
+
+    if r in ("素食", "吃素", "不吃肉"):
+        return category == "荤菜"
+    if r in ("清真", "不吃猪肉", "猪肉"):
+        non_pork = ("牛", "羊", "鸡", "鸭", "虾", "兔", "驴")
+        if "猪" in name:
+            return True
+        # "鱼香肉丝" 是猪肉菜（"鱼香"为调味词，非食材）
+        if "鱼香" in name and "肉" in name:
+            return True
+        return ("肉" in name) and not any(k in name for k in non_pork)
+
+    kw = (r.replace("不吃", "").replace("不能吃", "").replace("忌", "")
+          .replace("过敏", "").replace("忌口", "").strip())
+    if not kw:
+        return False
+    if kw in ("辣", "麻辣", "酸辣"):
+        return any(kw in t for t in tags)
+    if kw in name:
+        return True
+    return any(kw in t for t in tags)
+
+
+def filter_by_restrictions(dishes: list[dict], restrictions: str = "") -> list[dict]:
+    """按忌口列表（逗号分隔）剔除命中忌口的菜品。dishes 为 None 时返回空列表。"""
+    dishes = dishes or []
+    items = _split(restrictions)
+    if not items:
+        return dishes
+    return [d for d in dishes if not any(_is_restricted(d, r) for r in items)]
+
+
+# =============================================================================
 # @tool：推荐接口（B 的 agent 可注册调用）
 # =============================================================================
 
@@ -179,12 +233,14 @@ from langchain_core.tools import tool
 
 @tool
 def recommend(budget: float = 20, preferences: str = "",
-              health_goals: str = "", top_k: int = 5) -> list[dict]:
+              health_goals: str = "", dietary_restrictions: str = "",
+              top_k: int = 5) -> list[dict]:
     """推荐符合预算与营养需求的菜品。
     Args:
         budget: 预算（元/餐），默认 20；不传或为 0 时使用已保存的用户画像。
         preferences: 口味偏好，逗号分隔（如 "辣,清淡"）；为空时使用已保存画像。
         health_goals: 营养目标（高蛋白/控油/控糖/增肌/减脂）；为空时使用已保存画像。
+        dietary_restrictions: 忌口/过敏，逗号分隔（如 "不吃辣,猪肉"）；为空时使用已保存画像。
         top_k: 返回数量，默认 5。
     """
     from db import get_db
@@ -201,6 +257,7 @@ def recommend(budget: float = 20, preferences: str = "",
     effective_budget = budget_f
     effective_prefs = preferences if preferences else saved.get("flavor_preferences", "")
     effective_goal = health_goals if health_goals else saved.get("health_goals", "")
+    effective_restr = dietary_restrictions if dietary_restrictions else saved.get("dietary_restrictions", "")
 
     if not top_k or top_k < 0:
         top_k = 5
@@ -209,9 +266,12 @@ def recommend(budget: float = 20, preferences: str = "",
         "budget": effective_budget,
         "flavor_preferences": effective_prefs,
         "health_goals": effective_goal,
+        "dietary_restrictions": effective_restr,
     }
     dishes = db.get_all_dishes()
     # 预算硬约束：价格 > 预算的菜品直接排除
     dishes = [d for d in dishes if float(d["price"]) <= effective_budget]
+    # 忌口硬约束：剔除命中忌口/过敏的菜品
+    dishes = filter_by_restrictions(dishes, effective_restr)
     scored = score_dishes(dishes, user_profile, budget=effective_budget)
     return scored[:top_k]
