@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Calendar, Notebook } from '@element-plus/icons-vue'
 import { getRecords } from '@/api/records'
@@ -67,6 +67,64 @@ const grouped = computed<DayGroup[]>(() => {
       .map(([meal_time, items]) => ({ meal_time, label: mealLabel(meal_time), items })),
   }))
 })
+
+// 日期折叠面板（默认展开最近一天）
+const expandedDays = ref<string[]>([])
+
+// 餐次菜品展开状态：`date::meal_time` -> boolean
+const mealExpanded = ref<Record<string, boolean>>({})
+
+function mealKey(date: string, meal: string): string {
+  return `${date}::${meal}`
+}
+
+function toggleMeal(date: string, meal: string): void {
+  const k = mealKey(date, meal)
+  mealExpanded.value[k] = !mealExpanded.value[k]
+}
+
+function isMealExpanded(date: string, meal: string): boolean {
+  return !!mealExpanded.value[mealKey(date, meal)]
+}
+
+function mealTotalKcal(meal: DayMeal): number {
+  return Math.round(meal.items.reduce((s, r) => s + (r.calories || 0), 0))
+}
+
+// 是否全部折叠（用于切换按钮文案）
+const allCollapsed = computed(() => {
+  const keys = grouped.value.flatMap((d) => d.meals.map((m) => mealKey(d.date, m.meal_time)))
+  return keys.length > 0 && keys.every((k) => !mealExpanded.value[k])
+})
+
+// 全部折叠 / 展开：当前全部折叠则展开全部，否则全部折叠（含日期面板）
+function toggleAll(): void {
+  const expand = allCollapsed.value
+  for (const day of grouped.value) {
+    for (const m of day.meals) {
+      mealExpanded.value[mealKey(day.date, m.meal_time)] = expand
+    }
+  }
+  if (expand) {
+    expandedDays.value = grouped.value.map((d) => d.date)
+  } else {
+    expandedDays.value = []
+  }
+}
+
+// 加载到记录后：默认全部折叠
+watch(
+  records,
+  (list) => {
+    if (!list.length) return
+    // 初始全部折叠
+    mealExpanded.value = {}
+    if (grouped.value.length) {
+      expandedDays.value = [grouped.value[0].date]
+    }
+  },
+  { immediate: true },
+)
 
 const summary = computed(() => {
   const total = records.value.length
@@ -141,35 +199,65 @@ onMounted(load)
 
       <!-- 汇总 -->
       <div v-if="!loading && records.length" class="records-summary">
-        共 <b>{{ summary.total }}</b> 条记录，合计热量 <b>{{ summary.kcal }}</b> kcal
+        <span>
+          共 <b>{{ summary.total }}</b> 条记录，合计热量 <b>{{ summary.kcal }}</b> kcal
+        </span>
+        <el-button size="small" text type="primary" @click="toggleAll">
+          {{ allCollapsed ? '全部展开' : '全部折叠' }}
+        </el-button>
       </div>
 
-      <!-- 记录列表（按日期 → 餐次分组，每个餐次显示该餐所有菜） -->
+      <!-- 记录列表（按日期 → 餐次折叠面板，展开查看该餐所有菜） -->
       <div v-loading="loading" class="records-list">
         <template v-if="records.length">
-          <section v-for="day in grouped" :key="day.date" class="record-day">
-            <div class="record-day-title">{{ day.date }}</div>
-            <div v-for="meal in day.meals" :key="meal.meal_time" class="record-meal">
-              <div class="record-meal-title">
-                <span class="rm-badge" :class="meal.meal_time">{{ meal.label }}</span>
-                <span class="rm-count">{{ meal.items.length }} 道菜</span>
-              </div>
-              <div class="record-meal-items">
-                <div v-for="r in meal.items" :key="r.id" class="record-item">
-                  <span class="ri-name">{{ r.dish_name }}</span>
-                  <span class="ri-cat">{{ r.category }}</span>
-                  <span class="ri-nut">
-                    <span v-if="r.calories">{{ r.calories }} kcal</span>
-                    <span v-if="r.protein">· 蛋白{{ r.protein }}g</span>
-                    <span v-if="r.carbs">· 碳水{{ r.carbs }}g</span>
-                    <span v-if="r.fat">· 脂肪{{ r.fat }}g</span>
-                    <span v-if="r.portion !== 1">· x{{ r.portion }}</span>
+          <el-collapse v-model="expandedDays" class="record-collapse">
+            <el-collapse-item
+              v-for="day in grouped"
+              :key="day.date"
+              :name="day.date"
+              :title="day.date"
+            >
+              <div v-for="meal in day.meals" :key="meal.meal_time" class="record-meal">
+                <div class="record-meal-title">
+                  <span class="rm-badge" :class="meal.meal_time">{{ meal.label }}</span>
+                  <span class="rm-count">{{ meal.items.length }} 道菜</span>
+                  <span class="rm-kcal">
+                    {{ mealTotalKcal(meal) }} kcal
                   </span>
-                  <span class="ri-price">¥{{ r.price }}</span>
+                  <el-button
+                    size="small"
+                    text
+                    type="primary"
+                    class="rm-toggle"
+                    @click="toggleMeal(day.date, meal.meal_time)"
+                  >
+                    {{ isMealExpanded(day.date, meal.meal_time) ? '收起' : '展开' }}
+                  </el-button>
                 </div>
+                <el-collapse-transition>
+                  <div v-if="isMealExpanded(day.date, meal.meal_time)" class="record-meal-items">
+                    <div v-for="r in meal.items" :key="r.id" class="record-item">
+                      <span class="ri-name">{{ r.dish_name }}</span>
+                      <span class="ri-cat">{{ r.category }}</span>
+                      <span class="ri-nut">
+                        <span v-if="r.calories">{{ r.calories }} kcal</span>
+                        <span v-if="r.protein">· 蛋白{{ r.protein }}g</span>
+                        <span v-if="r.carbs">· 碳水{{ r.carbs }}g</span>
+                        <span v-if="r.fat">· 脂肪{{ r.fat }}g</span>
+                        <span v-if="r.portion !== 1">· x{{ r.portion }}</span>
+                      </span>
+                      <span class="ri-price">¥{{ r.price }}</span>
+                    </div>
+                    <el-empty
+                      v-if="!meal.items.length"
+                      description="该餐次暂无记录"
+                      :image-size="60"
+                    />
+                  </div>
+                </el-collapse-transition>
               </div>
-            </div>
-          </section>
+            </el-collapse-item>
+          </el-collapse>
         </template>
 
         <el-empty
@@ -236,6 +324,10 @@ onMounted(load)
 }
 
 .records-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   font-size: 13px;
   color: #606266;
   margin-bottom: 12px;
@@ -250,17 +342,14 @@ onMounted(load)
   min-height: 120px;
 }
 
-.record-day {
-  margin-bottom: 16px;
-}
-
-.record-day-title {
+.record-collapse :deep(.el-collapse-item__header) {
   font-weight: 600;
   font-size: 14px;
   color: #303133;
-  margin-bottom: 8px;
-  border-left: 3px solid var(--el-color-primary);
-  padding-left: 8px;
+}
+
+.record-collapse :deep(.el-collapse-item__content) {
+  padding-bottom: 8px;
 }
 
 .record-meal {
@@ -272,6 +361,18 @@ onMounted(load)
   align-items: center;
   gap: 8px;
   margin-bottom: 6px;
+}
+
+.rm-kcal {
+  margin-left: auto;
+  font-size: 12px;
+  color: #909399;
+  white-space: nowrap;
+}
+
+.rm-toggle {
+  padding: 0 6px;
+  flex-shrink: 0;
 }
 
 .rm-badge {
