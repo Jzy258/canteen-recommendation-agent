@@ -8,7 +8,7 @@ import { track } from '@/utils/analytics'
 import DishCard from '@/components/DishCard.vue'
 import { useChatStore } from '@/stores/chat'
 import { useProfileStore } from '@/stores/profile'
-import type { ChatMessage } from '@/types/chat'
+import type { ChatMessage, ParsedDish } from '@/types/chat'
 
 const chatStore = useChatStore()
 const profileStore = useProfileStore()
@@ -83,6 +83,8 @@ async function sendByStream(text: string): Promise<'ok' | 'aborted' | 'failed'> 
   const prompt = buildPrompt(text)
   abortController = new AbortController()
   let succeeded = false
+  // 菜品数据暂存，对话结束后（done）再赋给消息，避免流式中途显示卡片
+  let pendingDishes: ParsedDish[] | null = null
   try {
     await chatStream(
       { message: prompt, session_id: sid },
@@ -92,13 +94,17 @@ async function sendByStream(text: string): Promise<'ok' | 'aborted' | 'failed'> 
         } else if (event.type === 'delta') {
           appendAssistant(event.content)
         } else if (event.type === 'dishes') {
-          // 结构化菜品数据：优先于文本解析，含完整营养信息
-          const msg = currentAssistant()
+          // 结构化菜品数据：暂存，等 done 后统一显示
           if (event.dishes?.length) {
-            msg.dishes = event.dishes
+            pendingDishes = event.dishes
           }
         } else if (event.type === 'done') {
           succeeded = true
+          // 对话结束：此时才挂载菜品卡片
+          if (pendingDishes?.length) {
+            currentAssistant().dishes = pendingDishes
+            pendingDishes = null
+          }
         }
       },
       abortController.signal,
