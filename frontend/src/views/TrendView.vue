@@ -249,6 +249,11 @@ onActivated(() => {
         </div>
       </template>
 
+      <!-- 用户提示：点击属性可显示对应折线 -->
+      <div class="trend-tip">
+        💡 点击图例中的属性（热量 / 蛋白质 / 碳水 / 脂肪）即可显示/隐藏对应的折线
+      </div>
+
       <!-- 图表一：仅热量趋势 -->
       <div class="trend-chart-block">
         <div class="block-title">🔥 热量趋势</div>
@@ -305,6 +310,20 @@ onActivated(() => {
 
 .trend-title .el-icon {
   color: var(--el-color-primary);
+}
+
+/* 用户提示：点击图例属性可显示/隐藏对应折线 */
+.trend-tip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #606266;
+  background: var(--el-color-primary-light-9);
+  border: 1px solid var(--el-color-primary-light-7);
+  border-radius: 10px;
+  padding: 8px 12px;
+  margin-bottom: 14px;
 }
 
 /* C10 · 统计卡 */

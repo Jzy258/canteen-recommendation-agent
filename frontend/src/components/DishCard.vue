@@ -1,15 +1,44 @@
 <script setup lang="ts">
 import type { ParsedDish } from '@/types/chat'
 
-defineProps<{ dish: ParsedDish }>()
+// 是否可点击：为 false 时卡片变为静态不可点击（去掉 hover、光标恢复默认箭头）
+const props = withDefaults(
+  defineProps<{
+    dish: ParsedDish
+    isCardClickable?: boolean
+  }>(),
+  { isCardClickable: true },
+)
+
+// 菜品卡片点击事件：入参为当前菜品完整对象，交由外层（聊天页）处理
+const emit = defineEmits<{
+  (e: 'onDishCardClick', dishItem: ParsedDish): void
+}>()
 
 function fmt(v: number | undefined): string {
   return v !== undefined && v > 0 ? String(v) : '--'
 }
+
+/**
+ * 整卡点击处理：
+ * - 阻止事件冒泡，避免触发外层 AI 聊天大卡片的点击逻辑；
+ * - 控制台打印菜品完整信息（仅模拟，后续可替换为真实业务）；
+ * - 不可点击态直接忽略点击。
+ */
+function handleDishClick(e: MouseEvent): void {
+  e.stopPropagation()
+  if (!props.isCardClickable) return
+  console.log('[DishCard] 点击菜品完整信息：', props.dish)
+  emit('onDishCardClick', props.dish)
+}
 </script>
 
 <template>
-  <div class="dish-card">
+  <div
+    class="dish-card"
+    :class="{ 'is-clickable': isCardClickable }"
+    @click="handleDishClick"
+  >
     <div class="dish-head">
       <span class="dish-name">{{ dish.name }}</span>
       <span class="dish-price">¥{{ dish.price }}</span>
@@ -31,12 +60,25 @@ function fmt(v: number | undefined): string {
   padding: 12px 14px;
   background: #fff;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-  transition: box-shadow 0.2s, transform 0.2s;
+  transition: box-shadow 0.2s, transform 0.15s, background-color 0.2s;
 }
 
-.dish-card:hover {
-  box-shadow: 0 6px 16px rgba(50, 177, 108, 0.15);
+/* 可点击态：鼠标光标变为 pointer */
+.dish-card.is-clickable {
+  cursor: pointer;
+}
+
+/* hover：柔和上浮阴影 + 背景轻微高亮 */
+.dish-card.is-clickable:hover {
+  box-shadow: 0 6px 16px rgba(50, 177, 108, 0.18);
   transform: translateY(-2px);
+  background: #f6fbf8;
+}
+
+/* 按下：按压样式反馈（轻微下沉缩放） */
+.dish-card.is-clickable:active {
+  transform: translateY(0) scale(0.985);
+  box-shadow: 0 2px 6px rgba(50, 177, 108, 0.15);
 }
 
 .dish-head {
