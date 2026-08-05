@@ -10,11 +10,16 @@ const profileStore = useProfileStore()
 
 const budget = ref(profileStore.budget)
 const flavor = ref(profileStore.flavor_preferences)
-const healthGoal = ref(profileStore.health_goals)
+const healthGoals = ref<string[]>(splitGoals(profileStore.health_goals))
 const region = ref(profileStore.region)
 const locating = ref(false)
 
 const GOALS = ['高蛋白', '增肌', '控油', '控糖', '减脂']
+
+/** 逗号分隔字符串 <-> 数组 */
+function splitGoals(s: string): string[] {
+  return (s || '').split(',').map((g) => g.trim()).filter(Boolean)
+}
 
 // 后端画像加载完成 / 重置后，同步到表单
 watch(
@@ -22,7 +27,7 @@ watch(
   (p) => {
     budget.value = p.budget
     flavor.value = p.flavor_preferences
-    healthGoal.value = p.health_goals
+    healthGoals.value = splitGoals(p.health_goals)
     region.value = p.region || ''
   },
   { deep: true },
@@ -49,7 +54,7 @@ async function save(): Promise<void> {
   const profile: UserProfile = {
     budget: budget.value,
     flavor_preferences: flavor.value,
-    health_goals: healthGoal.value,
+    health_goals: healthGoals.value.join(','),
     region: region.value,
   }
   await profileStore.save(profile)
@@ -60,7 +65,7 @@ function reset(): void {
   profileStore.reset()
   budget.value = profileStore.budget
   flavor.value = ''
-  healthGoal.value = ''
+  healthGoals.value = []
   region.value = ''
   ElMessage.info('已恢复默认')
 }
@@ -91,9 +96,18 @@ defineExpose({ save })
     </div>
 
     <div class="pf-section">
-      <div class="pf-title"><el-icon><FirstAidKit /></el-icon>健康目标</div>
+      <div class="pf-title"><el-icon><FirstAidKit /></el-icon>健康目标（可多选）</div>
       <div class="pf-body">
-        <el-select v-model="healthGoal" placeholder="选填" clearable style="width: 220px">
+        <el-select
+          v-model="healthGoals"
+          multiple
+          collapse-tags
+          collapse-tags-tooltip
+          :max-collapse-tags="3"
+          placeholder="选填，可多选"
+          clearable
+          style="width: 100%"
+        >
           <el-option v-for="g in GOALS" :key="g" :label="g" :value="g" />
         </el-select>
       </div>

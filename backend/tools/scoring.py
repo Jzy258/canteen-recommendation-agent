@@ -73,14 +73,27 @@ def budget_score(price: float, budget: float) -> float:
     return max(0.0, 1.0 - exceed / 2.0)
 
 
+def _goal_weights(health_goals: str) -> dict:
+    """根据健康目标（支持逗号分隔多选）返回营养权重。
+    多目标时对每个目标的权重取平均。"""
+    default = GOAL_NUTRITION_WEIGHTS[""]
+    goals = [g.strip() for g in _split(health_goals) if g.strip()]
+    if not goals:
+        return dict(default)
+    weights = [GOAL_NUTRITION_WEIGHTS.get(g, default) for g in goals]
+    n = len(weights)
+    return {k: sum(w[k] for w in weights) / n for k in NUTRIENTS}
+
+
 def nutrition_score(dish: dict, health_goal: str = "") -> float:
     """营养均衡得分 [0,1]：各项营养相对类别目标的偏离度越小得分越高。
-    dish 为 None 或空时返回中性 0。"""
+    dish 为 None 或空时返回中性 0。
+    health_goal 支持逗号分隔的多目标（如 "高蛋白,控油"），权重取均值。"""
     if not dish:
         return 0.0
     category = dish.get("category") or "素菜"
     targets = CATEGORY_TARGETS.get(category, CATEGORY_TARGETS["素菜"])
-    goal_weights = GOAL_NUTRITION_WEIGHTS.get(health_goal, GOAL_NUTRITION_WEIGHTS[""])
+    goal_weights = _goal_weights(health_goal)
 
     deviation_sum = 0.0
     for n in NUTRIENTS:
@@ -111,8 +124,9 @@ def preference_score(dish: dict, user_profile: dict) -> float:
     else:
         flavor_score = 0.5
 
-    # 荤素偏好：减脂/控油偏好素菜；否则中性 0.5
-    if health_goal in LEAN_PREFER_VEGETARIAN:
+    # 荤素偏好：减脂/控油偏好素菜（多目标任一命中即可）；否则中性 0.5
+    goals = {g.strip() for g in _split(health_goal) if g.strip()}
+    if goals & LEAN_PREFER_VEGETARIAN:
         category_score = 1.0 if category == "素菜" else 0.3
     else:
         category_score = 0.5
