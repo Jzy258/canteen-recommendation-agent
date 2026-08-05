@@ -19,6 +19,28 @@ const locating = ref(false)
 
 const GOALS = ['高蛋白', '增肌', '控油', '控糖', '减脂']
 
+// 口味预设（点击切换，逗号分隔存储）
+const FLAVOR_PRESETS = ['辣', '清淡', '甜', '酸', '鲜', '咸香', '孜然', '蒜香']
+
+function flavorList(): string[] {
+  return flavor.value.split(/[,，]/).map((s) => s.trim()).filter(Boolean)
+}
+
+function hasFlavor(fp: string): boolean {
+  return flavorList().includes(fp)
+}
+
+function toggleFlavor(fp: string): void {
+  const list = flavorList()
+  const idx = list.indexOf(fp)
+  if (idx >= 0) {
+    list.splice(idx, 1)
+  } else {
+    list.push(fp)
+  }
+  flavor.value = list.join('，')
+}
+
 // 常见忌口项（多选）+ 自定义补充
 const COMMON_RESTRICTIONS = [
   '不吃辣',
@@ -149,10 +171,23 @@ defineExpose({ save })
 
     <div class="pf-section">
       <div class="pf-title"><el-icon><Sugar /></el-icon>口味偏好</div>
+      <div class="pf-body flavor-presets">
+        <el-tag
+          v-for="fp in FLAVOR_PRESETS"
+          :key="fp"
+          :class="{ active: hasFlavor(fp) }"
+          class="preset-tag"
+          :type="hasFlavor(fp) ? 'primary' : 'info'"
+          effect="plain"
+          @click="toggleFlavor(fp)"
+        >
+          {{ fp }}
+        </el-tag>
+      </div>
       <div class="pf-body">
         <el-input
           v-model="flavor"
-          placeholder="如：清淡,辣,甜（逗号分隔）"
+          placeholder="如：清淡，辣，甜（中文逗号分隔）"
           clearable
         />
       </div>
@@ -266,6 +301,25 @@ defineExpose({ save })
 
 .budget-sep {
   color: #c0c4cc;
+}
+
+/* 口味预设按钮 */
+.pf-body.flavor-presets {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.preset-tag {
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.2s;
+}
+
+.preset-tag:hover {
+  transform: translateY(-1px);
 }
 
 .pf-slider {

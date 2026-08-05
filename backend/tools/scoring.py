@@ -180,8 +180,8 @@ def score_dishes(dishes: list[dict], user_profile: dict,
 
 
 def _split(text: str) -> list[str]:
-    """按逗号拆分去空格。"""
-    return [t.strip() for t in str(text).split(",") if t.strip()]
+    """按逗号（中英文）拆分去空格。"""
+    return [t.strip() for t in str(text).replace("，", ",").split(",") if t.strip()]
 
 
 # =============================================================================
