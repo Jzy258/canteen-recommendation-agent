@@ -142,12 +142,12 @@ print("  [PASS] 5.2 关键词搜索: 无匹配返回空")
 
 # 5.3 分类筛选
 r = db.search_dishes(category="荤菜")
-assert len(r) == 15
-print("  [PASS] 5.3 分类筛选: 荤菜15道")
+assert len(r) == 27
+print("  [PASS] 5.3 分类筛选: 荤菜27道")
 
 r = db.search_dishes(category="素菜")
-assert len(r) == 13
-print("  [PASS] 5.3 分类筛选: 素菜13道")
+assert len(r) == 21
+print("  [PASS] 5.3 分类筛选: 素菜21道")
 
 # 5.4 价格筛选
 r = db.search_dishes(max_price=3)
@@ -178,11 +178,11 @@ print("  [PASS] 5.7 get_dish_by_name(不存在)")
 
 # 5.8 全部菜品
 all_d = db.get_all_dishes()
-assert len(all_d) == 54
+assert len(all_d) == 100
 for d in all_d:
     for k in ["id", "name", "calories", "protein", "carbs", "fat", "price", "category", "source"]:
         assert k in d, f"{d.get('name')} 缺少字段 {k}"
-print("  [PASS] 5.8 get_all_dishes: 54道, 字段完整")
+print("  [PASS] 5.8 get_all_dishes: 100道, 字段完整")
 
 # 5.9 用户画像
 uid = db.upsert_user_profile(budget=20, flavor_preferences="清淡", dietary_restrictions="海鲜过敏", health_goals="减脂")
@@ -252,12 +252,12 @@ print("  [PASS] 5.12 weather: 未知天气返回空")
 
 # 5.13 幂等性
 db.bulk_insert_dishes(dishes)
-assert len(db.get_all_dishes()) == 54
+assert len(db.get_all_dishes()) == 100
 print("  [PASS] 5.13 幂等性: 重复导入0条")
 
 # 5.14 边界条件
 r = db.search_dishes(keyword="")
-assert len(r) == 54
+assert len(r) == 100
 print("  [PASS] 5.14 边界: 空关键词返回全部")
 
 r = db.search_dishes(keyword="!@#$%")
