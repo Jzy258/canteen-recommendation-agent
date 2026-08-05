@@ -106,6 +106,39 @@ npm run build      # 产物在 dist/，可静态托管或 nginx 托管
 - 生产（Docker）：前端通过 `/api` 反代，无需知道后端地址，检查 nginx 日志
 - 本地 dev：`VITE_API_BASE` 默认 `http://localhost:8000`，见 `frontend/.env.development`
 
+## 4.9 ginna.cn 生产部署（强制 HTTPS）
+
+线上站点 `https://ginna.cn/canteen/` 由服务器 nginx 托管（配置：`/etc/nginx/sites-available/marx-exercise`），marx 占主入口、canteen 在 `/canteen`。
+
+### 强制 HTTPS 关键配置
+- **80 → 443 全量重定向**：
+  ```nginx
+  server {
+      listen 80;
+      server_name ginna.cn www.ginna.cn;
+      return 301 https://$server_name$request_uri;
+  }
+  ```
+- **HSTS**（浏览器自动升级 HTTP→HTTPS）：
+  ```nginx
+  add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+  ```
+- **SSL 证书**：`/etc/nginx/ssl/ginna.cn.pem` / `.key`，TLSv1.2/1.3。
+- 前端目录：`/var/www/canteen-dist/`；canteen API 反代到 `127.0.0.1:8000`（SSE 需 `proxy_buffering off`）。
+
+### 验证命令
+```bash
+# 修改配置后
+nginx -t && systemctl reload nginx
+
+# 实测：HTTP 应全部 301 到 HTTPS
+curl -sI http://ginna.cn/canteen/ -o /dev/null -w 'code=%{http_code} loc=%{redirect_url}\n'   # 301 https://ginna.cn/canteen/
+curl -sI https://ginna.cn/canteen/ -o /dev/null -w 'code=%{http_code}\n'                     # 200
+```
+
+### 已知警告
+- `nginx -t` 提示 `duplicate MIME type "text/html"`（`/marx` 里 `sub_filter_types text/html` 与默认重复），无害，不影响功能。
+
 ## 5. 远程 LLM / Embedding 服务器（可选）
 
 可将 LLM 与 embedding 独立部署到一台服务器，后端通过网络访问，不占用本机资源。
