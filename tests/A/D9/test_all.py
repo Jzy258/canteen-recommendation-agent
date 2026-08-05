@@ -40,7 +40,7 @@ import csv
 rows = list(csv.DictReader(open(os.path.join(_PROJECT_ROOT, "backend", "data", "dishes.csv"),
                                 encoding="utf-8")))
 check("dishes.csv 有 serving_grams 列", "serving_grams" in rows[0])
-check("全部 54 道菜都有克重", all(r.get("serving_grams") for r in rows) and len(rows) == 54)
+check("全部 100 道菜都有克重", all(r.get("serving_grams") for r in rows) and len(rows) == 100)
 rice = next(r for r in rows if r["name"] == "米饭")
 check("米饭 serving_grams=175", rice["serving_grams"] == "175")
 

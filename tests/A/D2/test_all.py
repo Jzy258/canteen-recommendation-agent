@@ -98,7 +98,7 @@ try:
         capture_output=True, text=True, encoding="utf-8", env=sub_env
     )
     assert result.returncode == 0, f"clean.py --check 执行失败: {result.stderr}"
-    assert "54 条" in result.stdout, "输出未包含菜品数量"
+    assert "100 条" in result.stdout, "输出未包含菜品数量"
     print("  [PASS] clean.py --check 可正常执行")
 
     # ============================================================
@@ -123,7 +123,7 @@ try:
     print("  [PASS] 章节完整")
 
     assert "中国食物成分表" in log_content, "缺少数据来源说明"
-    assert "54" in log_content, "缺少菜品数量"
+    assert "100" in log_content, "缺少菜品数量"
     assert "clean.py" in log_content, "缺少清洗工具引用"
     print("  [PASS] 关键内容完整")
 
@@ -158,8 +158,8 @@ try:
     with open(dish_path, encoding="utf-8") as f:
         dishes = list(csv.DictReader(f))
     db.bulk_insert_dishes(dishes)
-    assert len(db.get_all_dishes()) == 54
-    print("  [PASS] 5.1 菜品导入: 54 道")
+    assert len(db.get_all_dishes()) == 100
+    print("  [PASS] 5.1 菜品导入: 100 道")
 
     import sqlite3
     conn = sqlite3.connect(tmp_db)
@@ -227,10 +227,10 @@ try:
     sys.path.insert(0, os.path.join(_PROJECT_ROOT, "backend", "data"))
     from clean import clean, load_csv
     _, report = clean(load_csv(dish_path)[1])
-    assert "原始记录: 54 条" in report[0]
-    assert "清洗后: 54 条" in report[1]
+    assert "原始记录: 100 条" in report[0]
+    assert "清洗后: 100 条" in report[1]
     assert "问题数: 0 项" in report[3]
-    print("  [PASS] 5.8 clean.py 验证: 54条0问题")
+    print("  [PASS] 5.8 clean.py 验证: 100条0问题")
 
     print("\n" + "=" * 50)
     print("全部验证通过")
