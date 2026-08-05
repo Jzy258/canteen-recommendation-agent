@@ -43,9 +43,9 @@ def _public_user(user: dict) -> dict:
 
 def _validate_password(password: str):
     if len(password) < 6:
-        raise HTTPException(status_code=400, detail="Password must be at least 6 chars")
+        raise HTTPException(status_code=400, detail="密码长度至少 6 位")
     if len(password) > 128:
-        raise HTTPException(status_code=400, detail="Password too long")
+        raise HTTPException(status_code=400, detail="密码过长")
 
 
 @router.post("/register")
@@ -53,11 +53,11 @@ def register(req: RegisterRequest):
     """注册新用户。username 唯一，默认角色 user。"""
     username = req.username.strip()
     if not username:
-        raise HTTPException(status_code=400, detail="Username required")
+        raise HTTPException(status_code=400, detail="请输入用户名")
     _validate_password(req.password)
     db = get_db()
     if db.get_user_by_username(username) is not None:
-        raise HTTPException(status_code=409, detail="Username already exists")
+        raise HTTPException(status_code=409, detail="用户名已存在")
     uid = db.create_user(username, hash_password(req.password),
                          role="user", display_name=req.display_name.strip())
     return {"id": uid, "username": username, "role": "user"}
@@ -68,9 +68,9 @@ def login(req: LoginRequest):
     """登录校验，返回 access_token 与用户公开信息。"""
     user = get_db().get_user_by_username(req.username.strip())
     if user is None or not verify_password(req.password, user["password_hash"]):
-        raise HTTPException(status_code=401, detail="Invalid username or password")
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
     if user.get("status") != 1:
-        raise HTTPException(status_code=403, detail="Account disabled")
+        raise HTTPException(status_code=403, detail="账号已被禁用")
     get_db().update_user_login(user["id"])
     token = create_access_token(user["id"], user["username"], user["role"])
     return {"access_token": token, "token_type": "bearer",
@@ -89,7 +89,7 @@ def change_password(req: ChangePasswordRequest, user: dict = Depends(get_current
     db = get_db()
     stored = user["password_hash"]
     if not verify_password(req.old_password, stored):
-        raise HTTPException(status_code=400, detail="Old password incorrect")
+        raise HTTPException(status_code=400, detail="原密码不正确")
     _validate_password(req.new_password)
     db.change_user_password(user["id"], hash_password(req.new_password))
     return {"ok": True}

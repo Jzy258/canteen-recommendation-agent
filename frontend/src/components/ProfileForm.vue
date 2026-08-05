@@ -1,15 +1,18 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { FirstAidKit, NoSmoking, Sugar, Wallet } from '@element-plus/icons-vue'
+import { Aim, FirstAidKit, Location, NoSmoking, Sugar, Wallet } from '@element-plus/icons-vue'
 import type { UserProfile } from '@/types/chat'
 import { useProfileStore } from '@/stores/profile'
+import { getLocation } from '@/api/location'
 
 const profileStore = useProfileStore()
 
 const budget = ref(profileStore.budget)
 const flavor = ref(profileStore.flavor_preferences)
-const healthGoal = ref(profileStore.health_goals)
+const healthGoals = ref<string[]>(splitGoals(profileStore.health_goals))
+const region = ref(profileStore.region)
+const locating = ref(false)
 
 const GOALS = ['高蛋白', '增肌', '控油', '控糖', '减脂']
 
@@ -39,7 +42,41 @@ const customRestriction = ref(
   persistedRestrictions.filter((r) => !COMMON_RESTRICTIONS.includes(r)).join(','),
 )
 
-function save(): void {
+/** 逗号分隔字符串 <-> 数组 */
+function splitGoals(s: string): string[] {
+  return (s || '').split(',').map((g) => g.trim()).filter(Boolean)
+}
+
+// 后端画像加载完成 / 重置后，同步到表单
+watch(
+  () => profileStore.profile,
+  (p) => {
+    budget.value = p.budget
+    flavor.value = p.flavor_preferences
+    healthGoals.value = splitGoals(p.health_goals)
+    region.value = p.region || ''
+  },
+  { deep: true },
+)
+
+async function locate(): Promise<void> {
+  locating.value = true
+  try {
+    const { city } = await getLocation()
+    if (city) {
+      region.value = city
+      ElMessage.success(`已定位到：${city}`)
+    } else {
+      ElMessage.warning('定位失败，请手动输入所在城市')
+    }
+  } catch {
+    ElMessage.warning('定位失败，请手动输入所在城市')
+  } finally {
+    locating.value = false
+  }
+}
+
+async function save(): Promise<void> {
   const custom = customRestriction.value
     .split(',')
     .map((s) => s.trim())
@@ -48,10 +85,11 @@ function save(): void {
   const profile: UserProfile = {
     budget: budget.value,
     flavor_preferences: flavor.value,
-    health_goals: healthGoal.value,
+    health_goals: healthGoals.value.join(','),
     dietary_restrictions: all.join(','),
+    region: region.value,
   }
-  profileStore.save(profile)
+  await profileStore.save(profile)
   ElMessage.success('偏好已保存')
 }
 
@@ -59,7 +97,8 @@ function reset(): void {
   profileStore.reset()
   budget.value = profileStore.budget
   flavor.value = ''
-  healthGoal.value = ''
+  healthGoals.value = []
+  region.value = ''
   restrictions.value = []
   customRestriction.value = ''
   ElMessage.info('已恢复默认')
@@ -91,9 +130,18 @@ defineExpose({ save })
     </div>
 
     <div class="pf-section">
-      <div class="pf-title"><el-icon><FirstAidKit /></el-icon>健康目标</div>
+      <div class="pf-title"><el-icon><FirstAidKit /></el-icon>健康目标（可多选）</div>
       <div class="pf-body">
-        <el-select v-model="healthGoal" placeholder="选填" clearable style="width: 220px">
+        <el-select
+          v-model="healthGoals"
+          multiple
+          collapse-tags
+          collapse-tags-tooltip
+          :max-collapse-tags="3"
+          placeholder="选填，可多选"
+          clearable
+          style="width: 100%"
+        >
           <el-option v-for="g in GOALS" :key="g" :label="g" :value="g" />
         </el-select>
       </div>
@@ -111,6 +159,21 @@ defineExpose({ save })
           clearable
           class="pf-restriction-input"
         />
+      </div>
+    </div>
+
+    <div class="pf-section">
+      <div class="pf-title"><el-icon><Location /></el-icon>所在地区</div>
+      <div class="pf-body region-row">
+        <el-input
+          v-model="region"
+          placeholder="如：北京 / 上海（用于天气推荐）"
+          clearable
+        />
+        <el-button :loading="locating" @click="locate">
+          <el-icon style="margin-right: 4px"><Aim /></el-icon>
+          使用定位
+        </el-button>
       </div>
     </div>
 
@@ -175,6 +238,16 @@ defineExpose({ save })
 
 .pf-restriction-input {
   max-width: 420px;
+}
+
+.region-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.region-row .el-input {
+  flex: 1;
 }
 
 .pf-actions {

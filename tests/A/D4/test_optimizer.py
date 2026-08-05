@@ -5,6 +5,7 @@ A · D4 组合优化算法验证测试
 import csv, os, sys, tempfile
 
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+sys.path.insert(0, os.path.join(_PROJECT_ROOT, "backend"))
 sys.path.insert(0, os.path.join(_PROJECT_ROOT, "backend", "db"))
 sys.path.insert(0, os.path.join(_PROJECT_ROOT, "backend", "tools"))
 
