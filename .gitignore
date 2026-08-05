@@ -246,6 +246,7 @@ docs/具体计划（B角色）.md
 docs/C-工作计划.md
 docs/前端界面改进建议.md
 docs/前端企业级改进意见.md
+docs/文档生成要求.md
 
 # SQLite 数据库与运行时指标（init_db 生成，不入库）
 backend/data/canteen.db

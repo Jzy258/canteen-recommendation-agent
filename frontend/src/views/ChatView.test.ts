@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+﻿import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import ElementPlus from 'element-plus'
@@ -27,6 +27,11 @@ function mountView() {
   })
 }
 
+/** 精确定位“发送”按钮（避免匹配到“今日吃什么？”等 primary 快捷按钮） */
+function findSendBtn(wrapper: ReturnType<typeof mountView>) {
+  return wrapper.findAll('button').find((b) => b.text().includes('发送'))!
+}
+
 describe('ChatView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -36,7 +41,7 @@ describe('ChatView', () => {
   it('空输入不发起请求并提示', async () => {
     const wrapper = mountView()
     await wrapper.find('textarea').setValue('   ')
-    await wrapper.find('button.el-button--primary').trigger('click')
+    await findSendBtn(wrapper).trigger('click')
     await flushPromises()
 
     expect(mockedStream).not.toHaveBeenCalled()
@@ -53,7 +58,7 @@ describe('ChatView', () => {
 
     const wrapper = mountView()
     await wrapper.find('textarea').setValue('推荐清淡的菜')
-    await wrapper.find('button.el-button--primary').trigger('click')
+    await findSendBtn(wrapper).trigger('click')
     await flushPromises()
 
     expect(mockedStream).toHaveBeenCalledWith(
@@ -71,14 +76,14 @@ describe('ChatView', () => {
 
     const wrapper = mountView()
     await wrapper.find('textarea').setValue('你好')
-    await wrapper.find('button.el-button--primary').trigger('click')
+    await findSendBtn(wrapper).trigger('click')
     await flushPromises()
 
     expect(localStorage.getItem('canteen.session_id')).toBe('s-first')
 
     emitStream([{ type: 'session', session_id: 's-first' }, { type: 'done' }])
     await wrapper.find('textarea').setValue('继续')
-    await wrapper.find('button.el-button--primary').trigger('click')
+    await findSendBtn(wrapper).trigger('click')
     await flushPromises()
 
     expect(mockedStream).toHaveBeenLastCalledWith(
@@ -94,7 +99,7 @@ describe('ChatView', () => {
 
     const wrapper = mountView()
     await wrapper.find('textarea').setValue('hi')
-    await wrapper.find('button.el-button--primary').trigger('click')
+    await findSendBtn(wrapper).trigger('click')
     await flushPromises()
 
     expect(mockedChat).toHaveBeenCalled()
@@ -108,7 +113,7 @@ describe('ChatView', () => {
 
     const wrapper = mountView()
     await wrapper.find('textarea').setValue('hi')
-    await wrapper.find('button.el-button--primary').trigger('click')
+    await findSendBtn(wrapper).trigger('click')
     await flushPromises()
 
     const bubbles = wrapper.findAll('.chat-bubble')
@@ -132,7 +137,7 @@ describe('ChatView', () => {
 
     const wrapper = mountView()
     await wrapper.find('textarea').setValue('hi')
-    await wrapper.find('button.el-button--primary').trigger('click')
+    await findSendBtn(wrapper).trigger('click')
     await flushPromises()
 
     const stopBtn = wrapper.findAll('button').find((b) => b.text().includes('停止'))
@@ -149,7 +154,7 @@ describe('ChatView', () => {
     emitStream([{ type: 'session', session_id: 's-x' }, { type: 'done' }])
     const wrapper = mountView()
     await wrapper.find('textarea').setValue('hi')
-    await wrapper.find('button.el-button--primary').trigger('click')
+    await findSendBtn(wrapper).trigger('click')
     await flushPromises()
 
     const buttons = wrapper.findAll('button')
