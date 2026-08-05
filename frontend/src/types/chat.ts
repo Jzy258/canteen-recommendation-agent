@@ -35,7 +35,12 @@ export interface StreamDoneEvent {
   type: 'done'
 }
 
-export type StreamEvent = StreamSessionEvent | StreamDeltaEvent | StreamDoneEvent
+export interface StreamDishesEvent {
+  type: 'dishes'
+  dishes: ParsedDish[]
+}
+
+export type StreamEvent = StreamSessionEvent | StreamDeltaEvent | StreamDoneEvent | StreamDishesEvent
 
 export interface ParsedDish {
   name: string

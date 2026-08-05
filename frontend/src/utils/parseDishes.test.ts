@@ -44,6 +44,18 @@ describe('parseDishes', () => {
     expect(dishes[0].name).toBe('宫保鸡丁')
   })
 
+  it('解析同一行顿号分隔的多道菜（recommend_for_meal suggestion）', () => {
+    const text = '现在是早餐时间，建议您尝尝：花卷(1元)、豆浆(2元)、苹果(2元)。（参考自当日菜单，预算内，共5元）'
+    const dishes = parseDishes(text)
+    expect(dishes).toHaveLength(3)
+    expect(dishes[0].name).toBe('花卷')
+    expect(dishes[0].price).toBe(1)
+    expect(dishes[1].name).toBe('豆浆')
+    expect(dishes[1].price).toBe(2)
+    expect(dishes[2].name).toBe('苹果')
+    expect(dishes[2].price).toBe(2)
+  })
+
   it('普通文本不误判', () => {
     const text = '你好！我可以帮你查菜品营养、按预算推荐、记录摄入。'
     expect(parseDishes(text)).toHaveLength(0)

@@ -67,7 +67,8 @@ function finishAssistant(): void {
   const last = messages.value[messages.value.length - 1]
   if (!last || last.role !== 'assistant') return
   if (!last.time) last.time = nowTime()
-  if (!last.dishes) last.dishes = parseDishes(last.content)
+  // 结构化菜品数据（来自流式 dishes 事件）优先；否则从文本解析兜底
+  if (!last.dishes?.length) last.dishes = parseDishes(last.content)
   if (last.dishes.length) {
     track('dish_expose', { count: last.dishes.length })
   }
@@ -90,6 +91,12 @@ async function sendByStream(text: string): Promise<'ok' | 'aborted' | 'failed'> 
           chatStore.setSession(event.session_id)
         } else if (event.type === 'delta') {
           appendAssistant(event.content)
+        } else if (event.type === 'dishes') {
+          // 结构化菜品数据：优先于文本解析，含完整营养信息
+          const msg = currentAssistant()
+          if (event.dishes?.length) {
+            msg.dishes = event.dishes
+          }
         } else if (event.type === 'done') {
           succeeded = true
         }

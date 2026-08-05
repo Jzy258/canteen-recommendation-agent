@@ -173,6 +173,10 @@ def _stream_reply(session_id: str, message: str):
         buffer = []
         errored = False
         cleaner = StreamMarkdownCleaner()
+        # 收集工具返回的菜品结构化数据（推荐/检索），推给前端渲染菜品卡片。
+        # 数据含完整营养信息，前端用它覆盖文本解析的卡片（文本里通常没有营养）。
+        dish_data: list[dict] = []
+        _seen_names: set[str] = set()
         # 过滤工具调用中间输出（避免前端看到 {"name":"recommend",...} 等 JSON）：
         # 工具调用的 AIMessageChunk 带 tool_call_chunks，其 content 属中间过程，
         # 实时丢弃；最终回复的 chunk 无 tool_call_chunks，正常实时推送。
@@ -194,6 +198,46 @@ def _stream_reply(session_id: str, message: str):
                             payload = json.dumps({"type": "delta", "content": clean_delta},
                                                  ensure_ascii=False)
                             yield f"data: {payload}\n\n"
+                elif ev == "on_tool_end":
+                    # 捕获推荐/检索类工具返回的菜品数据
+                    name = event.get("name", "")
+                    out = event.get("data", {}).get("output")
+                    if name in ("recommend_for_meal", "recommend", "retrieve_dishes"):
+                        # on_tool_end 的 output 是 ToolMessage，content 为 JSON 字符串
+                        parsed = None
+                        if isinstance(out, dict):
+                            parsed = out.get("dishes", out) if isinstance(out, (dict, list)) else None
+                        elif hasattr(out, "content"):
+                            content = out.content
+                            if isinstance(content, str) and content.strip():
+                                try:
+                                    parsed = json.loads(content)
+                                except Exception:
+                                    parsed = None
+                        items = []
+                        if isinstance(parsed, dict):
+                            items = parsed.get("dishes", []) if isinstance(parsed.get("dishes"), list) else []
+                        elif isinstance(parsed, list):
+                            items = parsed
+                        for d in items:
+                            if not isinstance(d, dict) or not d.get("name"):
+                                continue
+                            dn = d["name"]
+                            if dn in _seen_names:
+                                continue
+                            _seen_names.add(dn)
+                            dish_data.append({
+                                "name": dn,
+                                "price": d.get("price"),
+                                "calories": d.get("calories"),
+                                "protein": d.get("protein"),
+                                "carbs": d.get("carbs"),
+                                "fat": d.get("fat"),
+                                "category": d.get("category"),
+                                "reason": d.get("reason"),
+                            })
+                        if dish_data:
+                            yield f"data: {json.dumps({'type': 'dishes', 'dishes': dish_data}, ensure_ascii=False)}\n\n"
         except Exception as e:
             logger.exception("chat/stream 失败 | session=%s | err=%s", session_id, e)
             errored = True

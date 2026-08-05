@@ -63,6 +63,9 @@ export function parseDishes(text: string): ParsedDish[] {
     // 2) 数字列表 + 菜名 + 冒号 + 行内含价格（如 "1. 宫保鸡丁：…价格10元"）
     const isPlainItem =
       !isBoldItem && !!plainM && !!priceM && !isCombine && !/建议|总结|搭配|注意/.test(plainM[2])
+    // 3) 同一行顿号/逗号分隔的多道菜（如 "花卷(1元)、豆浆(2元)、苹果(2元)"）
+    const inlineRe = /(?:^|[、，,])\s*([^、，,()（）\n]+?)\s*[（(]?\s*(\d+(?:\.\d+)?)\s*元\s*[)）]?/g
+    const inlineM = line.match(inlineRe)
 
     if (isBoldItem || isPlainItem) {
       if (current) dishes.push(current)
@@ -79,6 +82,25 @@ export function parseDishes(text: string): ParsedDish[] {
       } else if (isPlainItem) {
         const sepIdx = line.search(/[:：]/)
         if (sepIdx !== -1) current.reason = line.slice(sepIdx + 1).trim()
+      }
+    } else if (inlineM && !isCombine) {
+      // 行内多菜：逐个解析菜名 + 价格（菜名前允许有引导语，如"建议您尝尝："）
+      const singleRe = /([^、，,()（）\n]+?)\s*[（(]?\s*(\d+(?:\.\d+)?)\s*元\s*[)）]?/g
+      let m: RegExpExecArray | null
+      while ((m = singleRe.exec(line)) !== null) {
+        const rawName = m[1].trim()
+        if (!rawName) continue
+        const price = parseFloat(m[2])
+        // 过滤引导语/说明性片段
+        let cleaned = rawName.replace(
+          /^.*?(建议您尝尝|尝尝|推荐您尝尝|推荐|以下是|为您推荐|建议|预算内共|共|总价|参考自|小计)/,
+          '',
+        )
+        cleaned = cleaned.replace(/^[:：\s]+/, '').trim()
+        if (!cleaned || /建议|推荐|尝尝|预算|参考自|总价|共|备注|注意|天气/.test(cleaned)) continue
+        const dish: ParsedDish = { name: cleaned, price }
+        extractNutrition(dish, line)
+        dishes.push(dish)
       }
     } else if (current) {
       extractNutrition(current, line)
