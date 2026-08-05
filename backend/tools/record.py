@@ -7,9 +7,11 @@ def _db():
 
 
 @tool
-def record_meal(date: str, meal_time: str, dish_id: int, portion: float = 1.0) -> int:
-    """记录一餐摄入（待确认状态），返回记录 id。"""
-    return _db().add_meal_record(date, meal_time, dish_id, portion)
+def record_meal(date: str, meal_time: str, dish_id: int, portion: float = 1.0,
+                grams: float | None = None) -> int:
+    """记录一餐摄入（待确认状态），返回记录 id。
+    grams：实际摄入克重（可选）。提供时按克重折算营养；不提供则按 portion 份数。"""
+    return _db().add_meal_record(date, meal_time, dish_id, portion, grams=grams)
 
 
 @tool

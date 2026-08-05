@@ -1,6 +1,6 @@
 -- ============================================================
 -- 食堂菜品推荐与营养分析 Agent — SQLite Schema
--- 版本：v1.1（新增用户系统：app_user 表；meal_record/user_profile 增加 user_id）
+-- 版本：v1.2（克重调控：dish.serving_grams 标准份量克数；meal_record.grams 实际摄入克重）
 -- 所有者：A · 数据与算法
 -- 说明：本 schema 为唯一来源，B 的 store/record 工具只读此 schema
 -- ============================================================
@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS dish (
     price           REAL    NOT NULL,                     -- 价格 (元)
     category        TEXT    NOT NULL,                     -- 类别：荤菜/素菜/汤/主食/水果/饮品
     flavor_tags     TEXT    DEFAULT '',                   -- 口味标签，逗号分隔，如 "辣,酸甜"
+    serving_grams   REAL    DEFAULT 150,                  -- v1.2 标准份量克数（一份多少克）
     source          TEXT    NOT NULL,                     -- 参考来源，如 "中国食物成分表第6版"
     created_at      TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
@@ -71,6 +72,7 @@ CREATE TABLE IF NOT EXISTS meal_record (
     meal_time       TEXT    NOT NULL,                     -- 餐次：breakfast / lunch / dinner
     dish_id         INTEGER NOT NULL REFERENCES dish(id) ON DELETE CASCADE,
     portion         REAL    NOT NULL DEFAULT 1.0,         -- 份量系数，1.0 = 1份
+    grams           REAL    DEFAULT NULL,                 -- v1.2 实际摄入克重（NULL 时用 portion 换算）
     confirmed       INTEGER NOT NULL DEFAULT 0,           -- HITL 状态：0=待确认, 1=已确认, -1=已拒绝
     user_id         INTEGER REFERENCES app_user(id) ON DELETE SET NULL,  -- v1.1 记录归属用户（NULL=匿名/历史）
     created_at      TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
@@ -124,14 +126,19 @@ ORDER BY m.date, m.meal_time, d.id;
 
 
 -- 按天/餐次汇总营养摄入（仅已确认记录）
+-- 克重换算：grams 有值且 serving_grams>0 时按实际克重/标准克重折算，否则按份数 portion
 CREATE VIEW IF NOT EXISTS v_daily_nutrition AS
 SELECT
     mr.date,
     mr.meal_time,
-    SUM(d.calories * mr.portion) AS total_calories,
-    SUM(d.protein  * mr.portion) AS total_protein,
-    SUM(d.carbs    * mr.portion) AS total_carbs,
-    SUM(d.fat      * mr.portion) AS total_fat,
+    SUM(d.calories * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0
+                           THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_calories,
+    SUM(d.protein  * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0
+                           THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_protein,
+    SUM(d.carbs    * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0
+                           THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_carbs,
+    SUM(d.fat      * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0
+                           THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_fat,
     COUNT(DISTINCT mr.id)         AS dish_count
 FROM meal_record mr
 JOIN dish d ON mr.dish_id = d.id
@@ -144,10 +151,14 @@ ORDER BY mr.date, mr.meal_time;
 CREATE VIEW IF NOT EXISTS v_day_total AS
 SELECT
     mr.date,
-    SUM(d.calories * mr.portion) AS total_calories,
-    SUM(d.protein  * mr.portion) AS total_protein,
-    SUM(d.carbs    * mr.portion) AS total_carbs,
-    SUM(d.fat      * mr.portion) AS total_fat,
+    SUM(d.calories * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0
+                           THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_calories,
+    SUM(d.protein  * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0
+                           THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_protein,
+    SUM(d.carbs    * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0
+                           THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_carbs,
+    SUM(d.fat      * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0
+                           THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_fat,
     COUNT(DISTINCT mr.id)         AS dish_count
 FROM meal_record mr
 JOIN dish d ON mr.dish_id = d.id
@@ -161,10 +172,14 @@ CREATE VIEW IF NOT EXISTS v_weekly_nutrition AS
 SELECT
     strftime('%Y-%W', mr.date)   AS week_key,
     mr.date,
-    SUM(d.calories * mr.portion) AS total_calories,
-    SUM(d.protein  * mr.portion) AS total_protein,
-    SUM(d.carbs    * mr.portion) AS total_carbs,
-    SUM(d.fat      * mr.portion) AS total_fat
+    SUM(d.calories * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0
+                           THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_calories,
+    SUM(d.protein  * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0
+                           THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_protein,
+    SUM(d.carbs    * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0
+                           THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_carbs,
+    SUM(d.fat      * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0
+                           THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_fat
 FROM meal_record mr
 JOIN dish d ON mr.dish_id = d.id
 WHERE mr.confirmed = 1
@@ -178,10 +193,14 @@ SELECT
     strftime('%Y-%W', mr.date)   AS week_key,
     MIN(mr.date)                 AS start_date,
     MAX(mr.date)                 AS end_date,
-    SUM(d.calories * mr.portion) AS total_calories,
-    SUM(d.protein  * mr.portion) AS total_protein,
-    SUM(d.carbs    * mr.portion) AS total_carbs,
-    SUM(d.fat      * mr.portion) AS total_fat,
+    SUM(d.calories * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0
+                           THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_calories,
+    SUM(d.protein  * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0
+                           THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_protein,
+    SUM(d.carbs    * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0
+                           THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_carbs,
+    SUM(d.fat      * (CASE WHEN mr.grams IS NOT NULL AND d.serving_grams > 0
+                           THEN mr.grams / d.serving_grams ELSE mr.portion END)) AS total_fat,
     COUNT(DISTINCT mr.date)       AS day_count,
     COUNT(DISTINCT mr.id)         AS dish_count
 FROM meal_record mr
