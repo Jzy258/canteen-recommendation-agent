@@ -4,7 +4,7 @@ import { ElMessage } from 'element-plus'
 import { Aim, FirstAidKit, Location, NoSmoking, Sugar, Wallet } from '@element-plus/icons-vue'
 import type { UserProfile } from '@/types/chat'
 import { useProfileStore } from '@/stores/profile'
-import { getLocation } from '@/api/location'
+import { getLocation, getLocationByCoords, browserGeoLocation } from '@/api/location'
 
 const profileStore = useProfileStore()
 
@@ -62,13 +62,26 @@ watch(
 async function locate(): Promise<void> {
   locating.value = true
   try {
+    // 1) IP 定位优先
     const { city } = await getLocation()
     if (city) {
       region.value = city
       ElMessage.success(`已定位到：${city}`)
-    } else {
-      ElMessage.warning('定位失败，请手动输入所在城市')
+      return
     }
+    // 2) IP 定位失败 → 浏览器 GPS/WiFi 定位 + 逆地理编码
+    try {
+      const [lng, lat] = await browserGeoLocation()
+      const r = await getLocationByCoords(lng, lat)
+      if (r.city) {
+        region.value = r.city
+        ElMessage.success(`已定位到：${r.city}`)
+        return
+      }
+    } catch {
+      // 浏览器定位也失败
+    }
+    ElMessage.warning('自动定位失败，请手动输入所在城市')
   } catch {
     ElMessage.warning('定位失败，请手动输入所在城市')
   } finally {

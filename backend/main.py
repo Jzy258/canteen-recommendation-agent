@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import StreamingResponse
@@ -108,13 +108,71 @@ def trend(days: int = 7, end_date: str = "",
 
 
 @app.get("/location")
-def location():
-    """通过 IP 定位当前所在城市（供前端定位；本地/内网 IP 可能定位失败）。"""
+def location(request: Request, lng: float | None = None, lat: float | None = None):
+    """定位当前城市。
+    1) 提供 lng/lat（浏览器定位坐标）→ 高德逆地理编码反查城市
+    2) 否则按客户端 IP 定位（X-Forwarded-For / 直连 IP）
+    失败返回 {"city": ""}。"""
     try:
+        if lng is not None and lat is not None:
+            return {"city": _reverse_geocode(lng, lat) or ""}
         from mcp.weather_data import auto_locate_city
-        return {"city": auto_locate_city() or ""}
+        client_ip = _client_ip(request)
+        return {"city": auto_locate_city(client_ip) or ""}
     except Exception:
         return {"city": ""}
+
+
+def _reverse_geocode(lng: float, lat: float) -> str:
+    """高德逆地理编码：坐标 → 城市名。返回空串表示失败。"""
+    import json
+    import urllib.request
+    from urllib.parse import quote
+    key = os.getenv("WEATHER_API_KEY", "")
+    if not key:
+        return ""
+    url = (f"https://restapi.amap.com/v3/geocode/regeo"
+           f"?key={key}&location={lng},{lat}&extensions=base&output=JSON")
+    try:
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        if data.get("status") != "1":
+            return ""
+        ac = data.get("regeocode", {}).get("addressComponent", {})
+        city = ac.get("city") or ac.get("province") or ""
+        if isinstance(city, list):
+            city = city[0] if city else ""
+        return str(city).replace("市", "") if city else ""
+    except Exception:
+        return ""
+
+
+def _client_ip(request: Request) -> str:
+    """从请求提取客户端真实 IP（兼容 nginx 反代头）。
+    若为内网/回环地址则返回空串，让定位接口用服务器出口 IP。"""
+    forwarded = request.headers.get("x-forwarded-for", "")
+    ip = ""
+    if forwarded:
+        first = forwarded.split(",")[0].strip()
+        if first:
+            ip = first
+    if not ip:
+        ip = request.headers.get("x-real-ip", "") or ""
+    if not ip and request.client:
+        ip = request.client.host or ""
+    # 内网/回环/本机地址：高德无法定位，交给接口用出口 IP
+    if ip and _is_private_ip(ip):
+        return ""
+    return ip
+
+
+def _is_private_ip(ip: str) -> bool:
+    import ipaddress
+    try:
+        addr = ipaddress.ip_address(ip.split("%")[0])
+    except ValueError:
+        return True
+    return addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_unspecified
 
 
 @app.get("/records")

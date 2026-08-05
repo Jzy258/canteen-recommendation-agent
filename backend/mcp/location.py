@@ -18,7 +18,8 @@ from urllib.parse import quote
 
 from dotenv import load_dotenv
 
-load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
+# .env 位于 backend/.env（mcp/location.py -> 上一级是 backend）
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
 
 # 定位缓存文件
 _BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
