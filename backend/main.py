@@ -162,11 +162,21 @@ def _stream_reply(session_id: str, message: str):
         buffer = []
         errored = False
         cleaner = StreamMarkdownCleaner()
+<<<<<<< HEAD
+        # 过滤工具调用中间输出（避免前端看到 {"name":"recommend",...} 等 JSON）：
+        # 工具调用的 AIMessageChunk 带 tool_call_chunks，其 content 属中间过程，
+        # 实时丢弃；最终回复的 chunk 无 tool_call_chunks，正常实时推送。
+=======
+>>>>>>> main
         try:
             async for event in agent.astream_events(
                     {"messages": messages}, version="v2"):
-                if event.get("event") == "on_chat_model_stream":
+                ev = event.get("event")
+                if ev == "on_chat_model_stream":
                     chunk = event["data"]["chunk"]
+                    # 工具调用 chunk：一律丢弃其 content，避免 JSON 泄露
+                    if getattr(chunk, "tool_call_chunks", None):
+                        continue
                     delta = chunk.content if isinstance(chunk.content, str) else ""
                     if delta:
                         # 逐增量清洗 Markdown，保证前端实时收到纯文本
@@ -180,6 +190,10 @@ def _stream_reply(session_id: str, message: str):
             logger.exception("chat/stream 失败 | session=%s | err=%s", session_id, e)
             errored = True
 
+<<<<<<< HEAD
+        # 兜底：若异常中断且无任何输出，清空流式 cleaner 残留作为回复
+=======
+>>>>>>> main
         reply = clean_markdown("".join(buffer) + cleaner.flush())
         if errored or not reply.strip():
             reply = "抱歉，系统处理出错，请稍后再试或换一种问法。"
