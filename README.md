@@ -83,4 +83,4 @@ python tests/c/D1/test_contract.py
 
 ## 配置
 
-复制 `.env.example` 为 `.env` 填写（不提交真实密钥）。核心变量：`OLLAMA_BASE_URL`、`OLLAMA_MODEL`、`DB_PATH`、天气 `WEATHER_API_KEY`（可选）。
+复制 `.env.example` 为 `backend/.env` 填写（不提交真实密钥）。核心变量：`OLLAMA_BASE_URL`、`OLLAMA_MODEL`、`DB_PATH`、天气 `WEATHER_API_KEY`（可选）。

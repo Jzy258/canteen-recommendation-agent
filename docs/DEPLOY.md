@@ -91,7 +91,7 @@ npm run build      # 产物在 dist/，可静态托管或 nginx 托管
 - 数据变更后 RAG 索引按菜品签名自动重建
 
 ### 4.5 密钥
-- 一律走 `.env`，`WEATHER_API_KEY` / `OPENAI_API_KEY` 不入镜像
+- 一律走 `../backend/.env`，`WEATHER_API_KEY` / `OPENAI_API_KEY` 不入镜像
 - compose 中天气 key 通过环境变量透传，不写死
 
 ### 4.6 前端刷新 /trend 等路由返回 404
@@ -133,6 +133,66 @@ OLLAMA_EMBED_MODEL=bge-m3
 
 > 注意：`qwen3.5:7b` 在 ollama 库不存在；`qwen2.5:7b` 为替代（同样支持工具调用）。
 > CPU 推理较慢，对话/工具调用每轮约 5~30s，演示时耐心等待或改小模型（`qwen2.5:3b`）。
+> 远程 CPU 场景建议调大 `LLM_TIMEOUT`（`backend/.env` 设为 `120`~`180`），避免 Agent 工具循环因慢推理被超时中断。
+
+### 5.1 Ollama 服务性能优化（4H16G 无 GPU 实测）
+
+在 systemd 服务中追加以下环境变量，显著降低对话延迟：
+
+```bash
+sudo tee /etc/systemd/system/ollama.service > /dev/null <<'EOF'
+[Unit]
+Description=Ollama Service
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/ollama serve
+User=ubuntu
+Group=ubuntu
+Environment=OLLAMA_HOST=0.0.0.0:11434
+Environment=OLLAMA_KEEP_ALIVE=24h
+Environment=OLLAMA_NUM_PARALLEL=2
+Environment=OLLAMA_MAX_LOADED_MODELS=2
+Environment=OLLAMA_KV_CACHE_TYPE=q8_0
+Environment=OLLAMA_CONTEXT_LENGTH=4096
+Environment=OLLAMA_FLASH_ATTENTION=1
+Restart=always
+RestartSec=3
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload && sudo systemctl restart ollama
+```
+
+**各参数作用与实测效果**（4 核 AMD EPYC / 15G，qwen2.5:7b Q4_K_M + bge-m3 常驻）：
+
+| 参数 | 值 | 作用 |
+|------|-----|------|
+| `OLLAMA_KEEP_ALIVE` | `24h` | 模型常驻内存，**避免冷加载**（冷加载一次可达 83s+） |
+| `OLLAMA_NUM_PARALLEL` | `2` | 双并发 slot，请求不互相排队 |
+| `OLLAMA_KV_CACHE_TYPE` | `q8_0` | KV 缓存 8bit 量化，省内存 |
+| `OLLAMA_CONTEXT_LENGTH` | `4096` | 明确上下文长度（配合并行度实际 8192） |
+| `OLLAMA_FLASH_ATTENTION` | `1` | 开启 FA 加速 |
+| `OLLAMA_MAX_LOADED_MODELS` | `2` | 7b 与 bge-m3 同时常驻 |
+
+**实测性能对比**（远程 /api/chat）：
+
+| 场景 | 优化前 | 优化后 |
+|------|--------|--------|
+| 单次 LLM 调用（热模型） | 180s 超时 | **~1.0s** |
+| Agent 简单对话 | 超时 | **~2.5s** |
+| Agent 工具调用对话 | 120s 超时 | **~10~18s** |
+| 并发 embedding + chat | 24s | **~3.8s** |
+
+**关键经验**：
+1. **冷加载是最大坑**：首次请求或模型被卸载后再请求，`load_duration` 可达 80s+，会表现为"无回复"。`KEEP_ALIVE=24h` + 内存充足（7b 5.2G + bge-m3 1.2G + 系统 < 8G，15G 够用）可完全避免。
+2. **热模型下性能正常**：7B 模型 prompt 处理约 0.15s/500token，eval 约 7~9 tok/s。线程数（`num_threads` 2 vs 4）影响可忽略，不必调。
+3. **embedding 与 chat 并发**：同时触发 RAG embedding 与 7b 推理会抢占 CPU（冷态下明显），热模型下影响有限（3.8s）。如需更稳可把 `OLLAMA_NUM_PARALLEL` 降为 1 强制串行。
+4. **防止模型跑飞**：后端 `llm/client.py` 的 `ChatOllama` 已加 `model_kwargs={"num_predict": 512}`，限制单次生成上限，避免无限输出占满并发 slot。
+5. **换小模型受限**：服务器拉取 `qwen2.5:3b`（1.9G）从 ollama.com 仅 ~500KB/s，需 50 分钟+，大陆网络不现实；7B 已是该配置合理上限。
 
 ## 6. 环境变量
 

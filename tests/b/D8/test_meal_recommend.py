@@ -78,6 +78,23 @@ def test_recommend_budget_constraint():
         mt.now_override = None
 
 
+def test_total_price_correct():
+    """total_price 必须等于 dishes 各菜价格之和（修复 LLM 心算出错）。"""
+    mt.now_override = datetime(2026, 8, 4, 12, 0)
+    try:
+        r = recommend_for_meal.invoke({"top_k": 5})
+        if r["dishes"]:
+            expected = round(sum(float(d["price"]) for d in r["dishes"]), 2)
+            assert abs(r["total_price"] - expected) < 1e-6, (
+                f"total_price {r['total_price']} != sum {expected}")
+            print(f"  total_price={r['total_price']} == sum({expected}) OK")
+        else:
+            assert r["total_price"] == 0
+            print("  no dishes, total_price=0 OK")
+    finally:
+        mt.now_override = None
+
+
 if __name__ == "__main__":
     tests = [
         test_breakfast_time,
@@ -88,6 +105,7 @@ if __name__ == "__main__":
         test_recommend_for_meal_structure,
         test_suggestion_contains_meal_label,
         test_recommend_budget_constraint,
+        test_total_price_correct,
     ]
     passed = 0
     for t in tests:

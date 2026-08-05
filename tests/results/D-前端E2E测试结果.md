@@ -61,7 +61,7 @@
 ## 4. 发现的现象与备注
 
 1. **LLM 生成耗时较长**：`/chat` 非流式约 17.7s，流式约 5~13s；属后端 LLM 生成耗时，前端过程态正常。
-2. **`.env` 解析警告**：后端启动时 `python-dotenv could not parse statement at line 15/16`，不影响运行，建议检查这两行格式。
+2. **`../../backend/.env` 解析警告**：后端启动时 `python-dotenv could not parse statement at line 15/16`，不影响运行，建议检查这两行格式。
 3. **消息列表不持久化**：刷新页面后历史消息清空（仅 `session_id` 存 localStorage）——当前设计如此（多会话隔离），非缺陷。
 4. **Docker 本机不可用**：`com.docker.service` 停止 + WSL2 无 Linux 发行版，`docker compose` 部署待装好 WSL 后验证（对应 D5 里程碑）。
 
