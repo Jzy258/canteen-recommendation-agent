@@ -153,6 +153,11 @@ class StreamMarkdownCleaner:
                             and self._buf[k + 1] == " "):
                         self._buf = self._buf[k + 2:]
                         continue
+<<<<<<< HEAD
+=======
+                # 行首待定：`-`/数字等可能是列表起始，但数据不足时
+                # 无法确认后随字符（空格或换行），交给普通字符输出并恢复行首状态
+>>>>>>> main
                 if ch in "-*+" and nxt is None and not force:
                     break  # 跨 chunk 待定，等下一增量确认是否为列表符
                 if ch.isdigit() and nxt is None and not force:
