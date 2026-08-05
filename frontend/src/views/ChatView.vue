@@ -21,6 +21,18 @@ const QUICK_PROMPTS = [
 
 const messages = ref<ChatMessage[]>([])
 const input = ref('')
+
+// 菜品卡片点击后，把菜品名称填入输入框并聚焦：el-input 组件实例引用（用于调用 focus()）
+const inputRef = ref<{ focus?: () => void }>()
+
+/**
+ * 菜品名称填入输入框的文本处理模式（切换时改这里即可）：
+ * - 'append' ：模式B（追加，默认）—— 在输入框现有文字后面直接拼接菜品名称，不覆盖原内容
+ *              示例：已有"记录今天午餐："，点击"宫保鸡丁"后 → "记录今天午餐：宫保鸡丁"
+ * - 'replace'：模式A（覆盖）—— 输入框原有内容直接替换为菜品名称
+ */
+const INPUT_MODE: 'replace' | 'append' = 'append'
+
 const loading = ref(false)
 const streaming = ref(false)
 const listRef = ref<HTMLElement>()
@@ -76,6 +88,26 @@ function finishAssistant(): void {
 
 function fillPrompt(text: string): void {
   input.value = text
+}
+
+/**
+ * 菜品卡片点击回调（DishCard 通过 onDishCardClick 触发）。
+ * 业务：取出菜品名称填入底部输入框并聚焦，允许用户继续编辑；
+ * ⚠️ 只填入内容，不自动发送，需用户手动点击“发送”按钮提交消息。
+ */
+function handleDishCardClick(dishItem: ParsedDish): void {
+  console.log('[ChatView] 菜品卡片点击：', dishItem)
+  const name = dishItem.name || ''
+  if (INPUT_MODE === 'append') {
+    // 模式B：追加 —— 在现有文字后直接拼接菜品名称（不覆盖、不加空格）
+    // 例：已有"记录今天午餐："，点"宫保鸡丁"后 → "记录今天午餐：宫保鸡丁"
+    input.value = input.value + name
+  } else {
+    // 模式A：覆盖 —— 直接替换为菜品名称
+    input.value = name
+  }
+  // 输入框自动获取光标焦点，允许用户继续编辑（focus 为可选方法，用 ?. 避免未定义调用）
+  nextTick(() => inputRef.value?.focus?.())
 }
 
 async function sendByStream(text: string): Promise<'ok' | 'aborted' | 'failed'> {
@@ -254,7 +286,12 @@ onActivated(() => {
             <div class="chat-time">{{ msg.time }}</div>
             <div class="chat-bubble">{{ msg.content }}</div>
             <div v-if="msg.dishes && msg.dishes.length" class="dish-grid">
-              <DishCard v-for="d in msg.dishes" :key="d.name" :dish="d" />
+              <DishCard
+                v-for="d in msg.dishes"
+                :key="d.name"
+                :dish="d"
+                @onDishCardClick="handleDishCardClick"
+              />
             </div>
           </div>
           <div v-if="msg.role === 'user'" class="chat-avatar user">
@@ -284,6 +321,7 @@ onActivated(() => {
         </div>
 
         <el-input
+          ref="inputRef"
           v-model="input"
           type="textarea"
           :rows="2"
