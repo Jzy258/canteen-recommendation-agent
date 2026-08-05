@@ -4,6 +4,7 @@ import { fetchProfile, saveProfile } from '@/api/profile'
 
 const DEFAULT_PROFILE: UserProfile = {
   budget: 20,
+  budget_min: 0,
   flavor_preferences: '',
   health_goals: '',
   dietary_restrictions: '',
@@ -11,7 +12,7 @@ const DEFAULT_PROFILE: UserProfile = {
 }
 
 /**
- * 用户偏好与设置（预算 / 口味 / 忌口 / 健康目标 / 所在地区）。
+ * 用户偏好与设置（预算范围 / 口味 / 忌口 / 健康目标 / 所在地区）。
  * - 预算/口味/忌口/健康目标：**后端按 user_id 数据隔离**（GET/PUT /profile），
  *   登录用户各自独立，游客用无主画像。
  * - region（所在城市）：本地 localStorage（轻量位置信息，不入库）。
@@ -19,6 +20,7 @@ const DEFAULT_PROFILE: UserProfile = {
 export const useProfileStore = defineStore('profile', {
   state: () => ({
     budget: DEFAULT_PROFILE.budget,
+    budget_min: DEFAULT_PROFILE.budget_min,
     flavor_preferences: '',
     health_goals: '',
     dietary_restrictions: '',
@@ -33,16 +35,19 @@ export const useProfileStore = defineStore('profile', {
   getters: {
     profile: (s): UserProfile => ({
       budget: s.budget,
+      budget_min: s.budget_min,
       flavor_preferences: s.flavor_preferences,
       health_goals: s.health_goals,
       dietary_restrictions: s.dietary_restrictions,
       region: s.region,
     }),
-    /** 以自然语言注入对话的前缀，如"（用户偏好：预算20元，所在城市北京）" */
+    /** 以自然语言注入对话的前缀，如"（用户偏好：预算10~20元，所在城市北京）" */
     injectedPrompt: (s) => {
       if (!s.configured) return ''
       const parts: string[] = []
-      if (s.budget > 0) parts.push(`预算${s.budget}元`)
+      if (s.budget > 0) {
+        parts.push(s.budget_min > 0 ? `预算${s.budget_min}~${s.budget}元` : `预算${s.budget}元`)
+      }
       if (s.flavor_preferences.trim()) parts.push(`口味偏好${s.flavor_preferences.trim()}`)
       if (s.dietary_restrictions.trim()) parts.push(`忌口${s.dietary_restrictions.trim()}`)
       if (s.health_goals) parts.push(`目标${s.health_goals}`)
@@ -59,6 +64,7 @@ export const useProfileStore = defineStore('profile', {
       try {
         const p = await fetchProfile()
         this.budget = p.budget ?? DEFAULT_PROFILE.budget
+        this.budget_min = p.budget_min ?? DEFAULT_PROFILE.budget_min
         this.flavor_preferences = p.flavor_preferences || ''
         this.health_goals = p.health_goals || ''
         this.configured = true
@@ -71,6 +77,7 @@ export const useProfileStore = defineStore('profile', {
     /** 保存偏好：写入后端（按 user_id 隔离），region 存本地 */
     async save(p: UserProfile) {
       this.budget = p.budget
+      this.budget_min = p.budget_min
       this.flavor_preferences = p.flavor_preferences
       this.health_goals = p.health_goals
       this.dietary_restrictions = p.dietary_restrictions || ''
@@ -80,6 +87,7 @@ export const useProfileStore = defineStore('profile', {
       try {
         await saveProfile({
           budget: p.budget,
+          budget_min: p.budget_min,
           flavor_preferences: p.flavor_preferences,
           health_goals: p.health_goals,
         })
@@ -89,6 +97,7 @@ export const useProfileStore = defineStore('profile', {
     },
     reset() {
       this.budget = DEFAULT_PROFILE.budget
+      this.budget_min = DEFAULT_PROFILE.budget_min
       this.flavor_preferences = ''
       this.health_goals = ''
       this.dietary_restrictions = ''

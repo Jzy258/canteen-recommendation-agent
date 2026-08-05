@@ -8,7 +8,10 @@ import { getLocation, getLocationByCoords, browserGeoLocation } from '@/api/loca
 
 const profileStore = useProfileStore()
 
-const budget = ref(profileStore.budget)
+// 预算范围 [下限, 上限]（双滑块）
+const budgetRange = ref<[number, number]>([profileStore.budget_min, profileStore.budget])
+const BUDGET_MIN = 1
+const BUDGET_MAX = 100
 const flavor = ref(profileStore.flavor_preferences)
 const healthGoals = ref<string[]>(splitGoals(profileStore.health_goals))
 const region = ref(profileStore.region)
@@ -51,7 +54,7 @@ function splitGoals(s: string): string[] {
 watch(
   () => profileStore.profile,
   (p) => {
-    budget.value = p.budget
+    budgetRange.value = [p.budget_min, p.budget]
     flavor.value = p.flavor_preferences
     healthGoals.value = splitGoals(p.health_goals)
     region.value = p.region || ''
@@ -96,7 +99,8 @@ async function save(): Promise<void> {
     .filter(Boolean)
   const all = [...new Set([...restrictions.value, ...custom])]
   const profile: UserProfile = {
-    budget: budget.value,
+    budget: budgetRange.value[1],
+    budget_min: budgetRange.value[0],
     flavor_preferences: flavor.value,
     health_goals: healthGoals.value.join(','),
     dietary_restrictions: all.join(','),
@@ -108,7 +112,7 @@ async function save(): Promise<void> {
 
 function reset(): void {
   profileStore.reset()
-  budget.value = profileStore.budget
+  budgetRange.value = [profileStore.budget_min, profileStore.budget]
   flavor.value = ''
   healthGoals.value = []
   region.value = ''
@@ -123,10 +127,22 @@ defineExpose({ save })
 <template>
   <div class="profile-form">
     <div class="pf-section">
-      <div class="pf-title"><el-icon><Wallet /></el-icon>每餐预算</div>
+      <div class="pf-title"><el-icon><Wallet /></el-icon>每餐预算范围</div>
       <div class="pf-body budget-row">
-        <el-slider v-model="budget" :min="1" :max="100" class="pf-slider" />
-        <el-input-number v-model="budget" :min="1" :max="100" size="small" />
+        <el-slider
+          v-model="budgetRange"
+          range
+          :min="BUDGET_MIN"
+          :max="BUDGET_MAX"
+          class="pf-slider"
+        />
+      </div>
+      <div class="pf-body budget-inputs">
+        <span class="budget-label">最低</span>
+        <el-input-number v-model="budgetRange[0]" :min="BUDGET_MIN" :max="BUDGET_MAX" size="small" />
+        <span class="budget-sep">~</span>
+        <span class="budget-label">最高</span>
+        <el-input-number v-model="budgetRange[1]" :min="BUDGET_MIN" :max="BUDGET_MAX" size="small" />
         <span class="unit">元</span>
       </div>
     </div>
@@ -231,6 +247,25 @@ defineExpose({ save })
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+/* 预算上下限输入行 */
+.pf-body.budget-inputs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.budget-label {
+  color: #909399;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.budget-sep {
+  color: #c0c4cc;
 }
 
 .pf-slider {

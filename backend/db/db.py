@@ -135,6 +135,7 @@ class DatabaseInterface(ABC):
 
     @abstractmethod
     def upsert_user_profile(self, budget: float = 0,
+                            budget_min: float = 0,
                             flavor_preferences: str = "",
                             dietary_restrictions: str = "",
                             health_goals: str = "",
@@ -269,6 +270,11 @@ class SQLiteDatabase(DatabaseInterface):
                 if column not in cols:
                     conn.execute(
                         f"ALTER TABLE {table} ADD COLUMN {column} REAL")
+            # user_profile 增加预算下限列（v1.3 预算范围；budget 作为上限）
+            up_cols = {r["name"] for r in conn.execute(
+                "PRAGMA table_info(user_profile)").fetchall()}
+            if "budget_min" not in up_cols:
+                conn.execute("ALTER TABLE user_profile ADD COLUMN budget_min REAL")
             # 2) 重建聚合视图（schema.sql 已定义克重换算版，仅重建涉及克重的 4 个）
             views_to_rebuild = ("v_daily_nutrition", "v_day_total",
                                 "v_weekly_nutrition", "v_week_summary")
@@ -997,6 +1003,7 @@ class SQLiteDatabase(DatabaseInterface):
         return dict(row) if row else None
 
     def upsert_user_profile(self, budget: float = 0,
+                            budget_min: float = 0,
                             flavor_preferences: str = "",
                             dietary_restrictions: str = "",
                             health_goals: str = "",
@@ -1010,26 +1017,28 @@ class SQLiteDatabase(DatabaseInterface):
             # 合并：只覆盖非空入参，其余保留已有值
             merged = dict(existing)
             for key, val in [("budget", budget),
+                             ("budget_min", budget_min),
                              ("flavor_preferences", flavor_preferences),
                              ("dietary_restrictions", dietary_restrictions),
                              ("health_goals", health_goals)]:
                 if val not in (None, "", 0):
                     merged[key] = val
             sql = f"""UPDATE user_profile SET
-                      budget = ?, flavor_preferences = ?, dietary_restrictions = ?,
-                      health_goals = ?, updated_at = {now}
+                      budget = ?, budget_min = ?, flavor_preferences = ?,
+                      dietary_restrictions = ?, health_goals = ?, updated_at = {now}
                       WHERE id = ?"""
             with self._connect() as conn:
-                conn.execute(sql, (merged["budget"], merged["flavor_preferences"],
+                conn.execute(sql, (merged["budget"], merged.get("budget_min") or 0,
+                                   merged["flavor_preferences"],
                                    merged["dietary_restrictions"], merged["health_goals"],
                                    existing["id"]))
                 return existing["id"]
         else:
             sql = """INSERT INTO user_profile
-                     (budget, flavor_preferences, dietary_restrictions, health_goals, user_id)
-                     VALUES (?, ?, ?, ?, ?)"""
+                     (budget, budget_min, flavor_preferences, dietary_restrictions, health_goals, user_id)
+                     VALUES (?, ?, ?, ?, ?, ?)"""
             with self._connect() as conn:
-                cur = conn.execute(sql, (budget, flavor_preferences,
+                cur = conn.execute(sql, (budget, budget_min, flavor_preferences,
                                          dietary_restrictions, health_goals, user_id))
                 return cur.lastrowid
 

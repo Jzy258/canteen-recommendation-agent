@@ -88,6 +88,8 @@ export interface TrendPoint {
 
 export interface UserProfile {
   budget: number
+  /** 预算下限（元/餐），v1.3 预算范围 */
+  budget_min: number
   flavor_preferences: string
   health_goals: string
   /** 忌口/过敏，逗号分隔（如：不吃辣,香菜,猪肉） */

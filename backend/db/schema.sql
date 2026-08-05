@@ -87,7 +87,8 @@ CREATE INDEX IF NOT EXISTS idx_meal_record_user      ON meal_record(user_id);
 -- 5. user_profile — 用户画像（长期记忆）
 CREATE TABLE IF NOT EXISTS user_profile (
     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
-    budget                  REAL    DEFAULT 0,            -- 预算（元/餐）
+    budget                  REAL    DEFAULT 0,            -- 预算上限（元/餐）
+    budget_min              REAL    DEFAULT 0,            -- 预算下限（元/餐，v1.3 预算范围）
     flavor_preferences      TEXT    DEFAULT '',           -- 口味偏好，逗号分隔
     dietary_restrictions    TEXT    DEFAULT '',           -- 忌口/过敏，逗号分隔
     health_goals            TEXT    DEFAULT '',           -- 营养目标：高蛋白/控油/控糖/增肌/减脂
