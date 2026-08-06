@@ -252,7 +252,7 @@ onMounted(async () => {
             <el-table-column prop="created_at" label="注册时间" width="150" />
             <el-table-column label="操作" width="180" fixed="right">
               <template #default="{ row }">
-                <div class="row-actions">
+                <div class="row-actions row-actions--left">
                   <el-tooltip :content="row.status === 1 ? '禁用账号' : '启用账号'" placement="top">
                     <el-button size="small" circle plain @click="toggleUser(row)">{{ row.status === 1 ? '禁' : '启' }}</el-button>
                   </el-tooltip>

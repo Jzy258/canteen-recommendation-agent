@@ -235,6 +235,11 @@ class DatabaseInterface(ABC):
                             user_id: Optional[int] = None) -> bool:
         ...
 
+    @abstractmethod
+    def rename_chat_session(self, session_id: str, title: str,
+                            user_id: Optional[int] = None) -> bool:
+        ...
+
 
 # =============================================================================
 # SQLite 实现
@@ -1533,6 +1538,23 @@ class SQLiteDatabase(DatabaseInterface):
                 cur = conn.execute(
                     "DELETE FROM chat_session WHERE session_id = ? AND user_id = ?",
                     (session_id, user_id))
+            return cur.rowcount > 0
+
+    def rename_chat_session(self, session_id: str, title: str,
+                            user_id: Optional[int] = None) -> bool:
+        """重命名会话标题。user_id 用于越权校验；None 时任意改。
+        登录用户可改本人会话或历史无主（user_id NULL）会话。"""
+        with self._connect() as conn:
+            if user_id is None:
+                cur = conn.execute(
+                    "UPDATE chat_session SET title = ?, updated_at = datetime('now','localtime') "
+                    "WHERE session_id = ?",
+                    (title, session_id))
+            else:
+                cur = conn.execute(
+                    "UPDATE chat_session SET title = ?, updated_at = datetime('now','localtime') "
+                    "WHERE session_id = ? AND (user_id = ? OR user_id IS NULL)",
+                    (title, session_id, user_id))
             return cur.rowcount > 0
 
 

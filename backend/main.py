@@ -677,6 +677,25 @@ def delete_session(session_id: str,
     return {"ok": True}
 
 
+class SessionRenameRequest(BaseModel):
+    title: str
+
+
+@app.put("/sessions/{session_id}")
+def rename_session(session_id: str, req: SessionRenameRequest,
+                   user: dict | None = Depends(get_optional_user)):
+    """重命名历史会话（登录用户仅能改自己的或无主会话；游客改任意）。"""
+    from db import get_db
+    uid = user["id"] if user else None
+    title = (req.title or "").strip()[:50]
+    if not title:
+        raise HTTPException(status_code=400, detail="标题不能为空")
+    ok = get_db().rename_chat_session(session_id, title, user_id=uid)
+    if not ok:
+        raise HTTPException(status_code=404, detail="会话不存在或无权修改")
+    return {"ok": True}
+
+
 if __name__ == "__main__":
     import uvicorn
     host = os.getenv("BACKEND_HOST", "0.0.0.0")

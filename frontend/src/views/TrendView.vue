@@ -44,6 +44,14 @@ const stats = computed(() => {
   }
 })
 
+// 每日营养推荐参考（中国居民膳食指南，成年人通用值）：用于日均图推荐值对照
+const DAILY_TARGET = {
+  calories: 2000,  // kcal/日
+  protein: 60,     // g/日
+  carbs: 250,      // g/日
+  fat: 60,         // g/日
+}
+
 const avgStats = computed(() => {
   const pts = trend.value.filter((p) => p.dish_count > 0)
   const n = pts.length
@@ -225,16 +233,26 @@ function renderAvgCalChart(): void {
   chart.setOption({
     tooltip: {
       trigger: 'item',
-      formatter: '{b}: {c} kcal',
+      formatter: '{a}: {c} kcal',
       backgroundColor: 'rgba(255,255,255,0.96)',
       borderColor: '#d6efe2',
       borderWidth: 1,
       padding: [10, 14],
       textStyle: { color: '#303133', fontSize: 13 },
     },
+    legend: {
+      data: ['日均热量', '推荐'],
+      bottom: 8,
+      left: 'center' as const,
+      itemGap: 18,
+      icon: 'circle' as const,
+      itemWidth: 10,
+      itemHeight: 10,
+      textStyle: { color: '#606266', fontSize: 12 },
+    },
     xAxis: {
       type: 'category' as const,
-      data: ['日均热量'],
+      data: ['日均热量', '推荐'],
       axisLine: { lineStyle: { color: '#dcdfe6' } },
       axisTick: { show: false },
       axisLabel: { color: '#909399', fontSize: 12 },
@@ -244,16 +262,25 @@ function renderAvgCalChart(): void {
       axisLabel: { color: '#909399', fontSize: 12 },
       splitLine: { lineStyle: { color: '#f0f2f5', type: 'dashed' as const } },
       axisLine: { show: false },
+      // 上界取「数据最大值」与「推荐值」的较大者，保证推荐条可见
+      max: Math.max(avgStats.value.avgCal, DAILY_TARGET.calories) * 1.15,
     },
-    grid: { left: 26, right: 18, top: 28, bottom: 34 },
+    grid: { left: 26, right: 18, top: 28, bottom: 48 },
     series: [
       {
         name: '日均热量',
         type: 'bar',
-        data: [avgStats.value.avgCal],
+        data: [avgStats.value.avgCal, null],
         itemStyle: { color: '#32b16c' },
-        barWidth: 40,
+        barWidth: 34,
         emphasis: { itemStyle: { color: '#2a9c5f' } },
+      },
+      {
+        name: '推荐',
+        type: 'bar',
+        data: [null, DAILY_TARGET.calories],
+        itemStyle: { color: '#d0d4dd' },
+        barWidth: 34,
       },
     ],
   })
@@ -274,7 +301,7 @@ function renderAvgMacroChart(): void {
       textStyle: { color: '#303133', fontSize: 13 },
     },
     legend: {
-      data: ['蛋白质(g)', '碳水(g)', '脂肪(g)'],
+      data: ['蛋白质', '碳水', '脂肪', '推荐'],
       bottom: 8,
       left: 'center' as const,
       itemGap: 18,
@@ -285,7 +312,7 @@ function renderAvgMacroChart(): void {
     },
     xAxis: {
       type: 'category' as const,
-      data: ['日均营养'],
+      data: ['蛋白质', '碳水', '脂肪'],
       axisLine: { lineStyle: { color: '#dcdfe6' } },
       axisTick: { show: false },
       axisLabel: { color: '#909399', fontSize: 12 },
@@ -295,12 +322,20 @@ function renderAvgMacroChart(): void {
       axisLabel: { color: '#909399', fontSize: 12 },
       splitLine: { lineStyle: { color: '#f0f2f5', type: 'dashed' as const } },
       axisLine: { show: false },
+      // 上界取「三项数据最大值」与「三项推荐值」的较大者，保证推荐条可见
+      max: Math.max(
+        avgStats.value.avgProtein, avgStats.value.avgCarbs, avgStats.value.avgFat,
+        DAILY_TARGET.protein, DAILY_TARGET.carbs, DAILY_TARGET.fat,
+      ) * 1.15,
     },
     grid: { left: 26, right: 18, top: 28, bottom: 60 },
     series: [
-      { name: '蛋白质(g)', type: 'bar', data: [avgStats.value.avgProtein], itemStyle: { color: '#288e56' }, barWidth: 18 },
-      { name: '碳水(g)', type: 'bar', data: [avgStats.value.avgCarbs], itemStyle: { color: '#e6a23c' }, barWidth: 18 },
-      { name: '脂肪(g)', type: 'bar', data: [avgStats.value.avgFat], itemStyle: { color: '#f56c6c' }, barWidth: 18 },
+      { name: '蛋白质', type: 'bar', data: [avgStats.value.avgProtein, null, null], itemStyle: { color: '#288e56' }, barWidth: 14 },
+      { name: '碳水', type: 'bar', data: [null, avgStats.value.avgCarbs, null], itemStyle: { color: '#e6a23c' }, barWidth: 14 },
+      { name: '脂肪', type: 'bar', data: [null, null, avgStats.value.avgFat], itemStyle: { color: '#f56c6c' }, barWidth: 14 },
+      { name: '推荐', type: 'bar', data: [DAILY_TARGET.protein, null, null], itemStyle: { color: '#d0d4dd' }, barWidth: 14 },
+      { name: '推荐', type: 'bar', data: [null, DAILY_TARGET.carbs, null], itemStyle: { color: '#d0d4dd' }, barWidth: 14 },
+      { name: '推荐', type: 'bar', data: [null, null, DAILY_TARGET.fat], itemStyle: { color: '#d0d4dd' }, barWidth: 14 },
     ],
   })
 }
