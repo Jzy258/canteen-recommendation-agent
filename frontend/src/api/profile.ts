@@ -6,6 +6,7 @@ export interface BackendProfile {
   flavor_preferences: string
   dietary_restrictions: string
   health_goals: string
+  region?: string
 }
 
 export async function fetchProfile(): Promise<BackendProfile> {
@@ -19,6 +20,7 @@ export async function saveProfile(p: {
   flavor_preferences: string
   dietary_restrictions: string
   health_goals: string
+  region?: string
 }): Promise<void> {
   await http.put('/profile', p)
 }

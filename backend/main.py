@@ -361,12 +361,88 @@ def delete_food_record(record_id: int, user: dict | None = Depends(get_optional_
     return {"ok": True}
 
 
+class CustomDishCreate(BaseModel):
+    name: str
+    calories: float = 0
+    protein: float = 0
+    carbs: float = 0
+    fat: float = 0
+    price: float = 0
+    category: str = "自定义"
+    serving_grams: float = 150
+
+
+class CustomDishUpdate(BaseModel):
+    name: str | None = None
+    calories: float | None = None
+    protein: float | None = None
+    carbs: float | None = None
+    fat: float | None = None
+    price: float | None = None
+    category: str | None = None
+    serving_grams: float | None = None
+
+
+@app.get("/custom-dishes")
+def list_custom_dishes(user: dict | None = Depends(get_optional_user)):
+    """自定义菜品列表（登录用户仅本人；游客返回全部无主）。"""
+    from db import get_db
+    uid = user["id"] if user else None
+    return get_db().list_custom_dishes(user_id=uid)
+
+
+@app.post("/custom-dishes", status_code=201)
+def create_custom_dish(req: CustomDishCreate,
+                       user: dict | None = Depends(get_optional_user)):
+    """新增自定义菜品（归属当前用户；游客存为无主）。"""
+    name = (req.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="菜品名称不能为空")
+    from db import get_db
+    uid = user["id"] if user else None
+    did = get_db().add_custom_dish(
+        name=name, calories=req.calories or 0, protein=req.protein or 0,
+        carbs=req.carbs or 0, fat=req.fat or 0, price=req.price or 0,
+        category=req.category or "自定义",
+        serving_grams=req.serving_grams or 150,
+        user_id=uid)
+    return {"id": did, "ok": True}
+
+
+@app.put("/custom-dishes/{dish_id}")
+def update_custom_dish(dish_id: int, req: CustomDishUpdate,
+                       user: dict | None = Depends(get_optional_user)):
+    """修改自定义菜品（仅更新传入字段；登录用户仅能改自己的或无主）。"""
+    from db import get_db
+    uid = user["id"] if user else None
+    ok = get_db().update_custom_dish(
+        dish_id, user_id=uid,
+        name=req.name, calories=req.calories, protein=req.protein,
+        carbs=req.carbs, fat=req.fat, price=req.price,
+        category=req.category, serving_grams=req.serving_grams)
+    if not ok:
+        raise HTTPException(status_code=404, detail="菜品不存在或无权修改")
+    return {"ok": True}
+
+
+@app.delete("/custom-dishes/{dish_id}")
+def delete_custom_dish(dish_id: int, user: dict | None = Depends(get_optional_user)):
+    """删除自定义菜品（登录用户仅能删自己的或无主）。"""
+    from db import get_db
+    uid = user["id"] if user else None
+    ok = get_db().delete_custom_dish(dish_id, user_id=uid)
+    if not ok:
+        raise HTTPException(status_code=404, detail="菜品不存在或无权删除")
+    return {"ok": True}
+
+
 class ProfileUpdateRequest(BaseModel):
     budget: float | None = None
     budget_min: float | None = None
     flavor_preferences: str | None = None
     dietary_restrictions: str | None = None
     health_goals: str | None = None
+    region: str | None = None
 
 
 @app.get("/profile")
@@ -381,6 +457,7 @@ def get_profile(user: dict | None = Depends(get_optional_user)):
         "flavor_preferences": p.get("flavor_preferences", ""),
         "dietary_restrictions": p.get("dietary_restrictions", ""),
         "health_goals": p.get("health_goals", ""),
+        "region": p.get("region", ""),
     }
 
 
@@ -397,6 +474,7 @@ def update_profile(req: ProfileUpdateRequest,
         flavor_preferences=req.flavor_preferences or "",
         dietary_restrictions=req.dietary_restrictions or "",
         health_goals=req.health_goals or "",
+        region=req.region if req.region is not None else "",
         user_id=uid,
     )
     return {"ok": True}
@@ -422,7 +500,7 @@ def chat(req: ChatRequest, user: dict | None = Depends(get_optional_user)):
         # Token 统计（tiktoken 精确计数，回退字符估算）
         in_tokens = count_tokens(req.message) + count_messages(history)
         out_tokens = count_tokens(reply)
-        add_tokens(in_tokens + out_tokens)
+        add_tokens(in_tokens + out_tokens, user_id=uid)
         logger.info("chat 成功 | session=%s | in_tokens=%s out_tokens=%s | reply_len=%s",
                     session_id, in_tokens, out_tokens, len(reply))
     except Exception as e:
@@ -542,7 +620,7 @@ def _stream_reply(session_id: str, message: str, user_id: int | None = None):
             yield f"data: {payload}\n\n"
 
         # Token 统计 + 会话持久化（流式结束时统一处理）
-        add_tokens(count_tokens(message) + count_tokens(reply))
+        add_tokens(count_tokens(message) + count_tokens(reply), user_id=user_id)
         session_store.append(session_id, message, reply, user_id=user_id)
         logger.info("chat/stream 完成 | session=%s | reply_len=%s", session_id, len(reply))
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
@@ -580,9 +658,11 @@ def list_sessions(user: dict | None = Depends(get_optional_user),
 @app.get("/sessions/{session_id}/messages")
 def get_session_messages(session_id: str,
                          user: dict | None = Depends(get_optional_user)):
-    """某会话的完整消息历史（供前端恢复对话）。"""
+    """某会话的完整消息历史（供前端恢复对话）。
+    登录用户仅能读本人的或历史无主（user_id NULL）会话；游客读任意。"""
     from db import get_db
-    return get_db().get_chat_messages(session_id)
+    uid = user["id"] if user else None
+    return get_db().get_chat_messages(session_id, user_id=uid)
 
 
 @app.delete("/sessions/{session_id}")

@@ -13,6 +13,7 @@ const router = createRouter({
     { path: '/menu', name: 'menu', component: () => import('@/views/MenuView.vue'), meta: { requiresAuth: true } },
     { path: '/records', name: 'records', component: () => import('@/views/RecordsView.vue'), meta: { requiresAuth: true } },
     { path: '/profile', name: 'profile', component: () => import('@/views/ProfileView.vue'), meta: { requiresAuth: true } },
+    { path: '/admin', name: 'admin', component: () => import('@/views/AdminView.vue'), meta: { requiresAuth: true, requiresAdmin: true } },
     { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue') },
   ],
 })
@@ -51,6 +52,14 @@ router.beforeEach((to) => {
     return {
       name: 'login',
       query: { redirect: to.fullPath },
+    }
+  }
+  // 管理员专属页面：非管理员跳回首页
+  if (to.meta.requiresAdmin) {
+    const auth = getStoredAuth()
+    const role = (auth.user as { role?: string } | undefined)?.role
+    if (role !== 'admin') {
+      return { name: 'chat' }
     }
   }
   // 已登录访问登录页 → 回到首页

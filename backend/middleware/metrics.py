@@ -17,6 +17,7 @@ _stats = {
     "total_time_ms": 0.0,
     "total_tokens": 0,
     "by_path": defaultdict(int),
+    "by_user": defaultdict(int),  # user_id(str) -> token 累计
     "token_history": [],  # [{time, tokens}]
 }
 
@@ -24,6 +25,28 @@ _stats = {
 _BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _STATS_FILE = os.getenv("METRICS_FILE") or os.path.join(_BACKEND_ROOT, "data", "metrics.json")
 _MAX_TOKEN_HISTORY = 1000  # 内存中保留的 token 记录条数上限
+
+
+def _load():
+    """从磁盘加载持久化的统计数据（若存在），恢复到运行期内存结构中。"""
+    try:
+        if os.path.exists(_STATS_FILE):
+            with open(_STATS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            _stats["requests"] = int(data.get("requests", 0))
+            _stats["errors"] = int(data.get("errors", 0))
+            _stats["total_time_ms"] = float(data.get("total_time_ms", 0.0))
+            _stats["total_tokens"] = int(data.get("total_tokens", 0))
+            # 恢复 by_path / by_user 为 defaultdict(int)
+            _stats["by_path"] = defaultdict(int, data.get("by_path", {}))
+            _stats["by_user"] = defaultdict(int, data.get("by_user", {}))
+    except Exception:
+        # 忽略任何加载错误，继续使用内存默认值
+        pass
+
+
+# 模块导入时尝试从持久化文件恢复统计
+_load()
 
 
 def _persist():
@@ -34,6 +57,7 @@ def _persist():
             "total_time_ms": round(_stats["total_time_ms"], 2),
             "total_tokens": _stats["total_tokens"],
             "by_path": dict(_stats["by_path"]),
+            "by_user": dict(_stats["by_user"]),
             "updated_at": datetime.now().isoformat(timespec="seconds"),
         }
         os.makedirs(os.path.dirname(_STATS_FILE), exist_ok=True)
@@ -43,11 +67,14 @@ def _persist():
         pass
 
 
-def add_tokens(count: int):
-    """外部（Agent 层）上报本次 LLM 调用消耗的 token 数。"""
+def add_tokens(count: int, user_id: int | None = None):
+    """外部（Agent 层）上报本次 LLM 调用消耗的 token 数。
+    user_id 非空时按用户累计（用于后台按用户查看用量）。"""
     if count <= 0:
         return
     _stats["total_tokens"] += count
+    if user_id is not None:
+        _stats["by_user"][str(user_id)] += count
     _stats["token_history"].append({
         "time": datetime.now().isoformat(timespec="seconds"),
         "tokens": count,
@@ -56,6 +83,11 @@ def add_tokens(count: int):
     if len(_stats["token_history"]) > _MAX_TOKEN_HISTORY:
         _stats["token_history"] = _stats["token_history"][-_MAX_TOKEN_HISTORY:]
     _persist()
+
+
+def get_token_usage_by_user() -> dict:
+    """返回 {user_id(str): tokens} 的按用户累计快照（供后台管理）。"""
+    return {k: int(v) for k, v in _stats["by_user"].items()}
 
 
 def get_metrics() -> dict:
@@ -67,6 +99,7 @@ def get_metrics() -> dict:
         "total_time_ms": round(_stats["total_time_ms"], 2),
         "total_tokens": _stats["total_tokens"],
         "by_path": dict(_stats["by_path"]),
+        "by_user": dict(_stats["by_user"]),
     }
 
 

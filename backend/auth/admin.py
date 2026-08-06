@@ -97,6 +97,30 @@ def reset_password(user_id: int, req: ResetPasswordRequest):
     return {"ok": True}
 
 
+# ===================== Token 用量 =====================
+
+
+@router.get("/token-usage", dependencies=[Depends(require_admin)])
+def token_usage():
+    """每个用户的 Token 用量（按 user_id 累计，不随进程重启清零；0 用量的用户也列出）。"""
+    from middleware.metrics import get_token_usage_by_user
+    by_user = get_token_usage_by_user()
+    rows = get_db().list_users(limit=200, offset=0)
+    items = []
+    for u in rows:
+        items.append({
+            "id": u["id"],
+            "username": u["username"],
+            "display_name": u.get("display_name", ""),
+            "role": u.get("role", "user"),
+            "status": u.get("status", 1),
+            "tokens": int(by_user.get(str(u["id"]), 0)),
+        })
+    items.sort(key=lambda x: x["tokens"], reverse=True)
+    total = sum(i["tokens"] for i in items)
+    return {"items": items, "total_tokens": total}
+
+
 # ===================== 菜品管理 =====================
 
 
@@ -183,6 +207,12 @@ class MenuRequest(BaseModel):
     date: str
     meal_time: str
     dish_ids: list[int] = Field(default_factory=list)
+
+
+@router.get("/menu", dependencies=[Depends(require_admin)])
+def get_menu(date: str, meal_time: str):
+    """查询某日期餐次的菜单菜品列表（供后台菜单管理回显）。"""
+    return get_db().get_dishes_for_menu(date, meal_time)
 
 
 @router.put("/menu", dependencies=[Depends(require_admin)])

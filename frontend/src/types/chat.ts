@@ -144,3 +144,16 @@ export interface FoodRecordItem {
   recommended_grams: number
   remark?: string
 }
+
+/** 用户自定义菜品（custom_dish，后端 /custom-dishes CRUD，按用户隔离） */
+export interface CustomDishItem {
+  id: number
+  name: string
+  calories: number
+  protein: number
+  carbs: number
+  fat: number
+  price: number
+  category: string
+  serving_grams: number
+}

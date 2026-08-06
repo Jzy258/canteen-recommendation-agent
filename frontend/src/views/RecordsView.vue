@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Calendar, Delete, Edit, Notebook, Plus } from '@element-plus/icons-vue'
+import { Calendar, Delete, Edit, Notebook, Plus, Setting } from '@element-plus/icons-vue'
 import {
   getFoodRecords, createFoodRecord, updateFoodRecord, deleteFoodRecord,
 } from '@/api/records'
-import type { FoodRecordItem } from '@/types/chat'
+import {
+  getCustomDishes, createCustomDish, updateCustomDish, deleteCustomDish,
+} from '@/api/customDishes'
+import type { FoodRecordItem, CustomDishItem } from '@/types/chat'
 
 const MEAL_LABELS: Record<string, string> = {
   breakfast: '早餐', lunch: '午餐', dinner: '晚餐', other: '其他',
@@ -101,11 +104,14 @@ const form = ref({
   fat: undefined as number | undefined,
   carbs: undefined as number | undefined,
   grams: undefined as number | undefined,
+  recommended_grams: undefined as number | undefined,
   remark: '',
 })
 
 function openCreate(): void {
   editingId.value = null
+  pickDishId.value = null
+  saveAsCustom.value = false
   form.value = {
     date: fmtDate(new Date()),
     meal_time: 'lunch',
@@ -116,6 +122,7 @@ function openCreate(): void {
     fat: undefined,
     carbs: undefined,
     grams: undefined,
+    recommended_grams: undefined,
     remark: '',
   }
   dialogVisible.value = true
@@ -124,6 +131,8 @@ function openCreate(): void {
 // 编辑：回填这条记录原有全部数据
 function openEdit(r: FoodRecordItem): void {
   editingId.value = r.id
+  pickDishId.value = null
+  saveAsCustom.value = false
   form.value = {
     date: r.date,
     meal_time: r.meal_time,
@@ -134,6 +143,7 @@ function openEdit(r: FoodRecordItem): void {
     fat: Number(r.fat) || undefined,
     carbs: Number(r.carbs) || undefined,
     grams: Number(r.grams) || undefined,
+    recommended_grams: Number(r.recommended_grams) || undefined,
     remark: r.remark || '',
   }
   dialogVisible.value = true
@@ -160,6 +170,7 @@ async function submit(): Promise<void> {
       fat: form.value.fat ?? 0,
       carbs: form.value.carbs ?? 0,
       grams: form.value.grams ?? 0,
+      recommended_grams: form.value.recommended_grams ?? 0,
       remark: form.value.remark,
     }
     if (editingId.value != null) {
@@ -167,10 +178,24 @@ async function submit(): Promise<void> {
       ElMessage.success('记录已更新')
     } else {
       await createFoodRecord(payload)
+      // 勾选"同时保存为我的菜品"时，把当前录入存为自定义菜品
+      if (saveAsCustom.value) {
+        await createCustomDish({
+          name: payload.name,
+          price: payload.price,
+          calories: payload.calories,
+          protein: payload.protein,
+          fat: payload.fat,
+          carbs: payload.carbs,
+        })
+      }
       ElMessage.success('记录已新增')
     }
+    pickDishId.value = null
+    saveAsCustom.value = false
     dialogVisible.value = false
     await load()
+    await loadCustomDishes()
   } catch {
     ElMessage.error('保存失败，请稍后重试')
   }
@@ -196,7 +221,129 @@ async function removeRecord(r: FoodRecordItem): Promise<void> {
   }
 }
 
-onMounted(load)
+// ---- 我的自定义菜品：选择填充 + 管理 ----
+const customDishes = ref<CustomDishItem[]>([])
+const pickDishId = ref<number | null>(null)
+const saveAsCustom = ref(false)
+
+async function loadCustomDishes(): Promise<void> {
+  try {
+    customDishes.value = await getCustomDishes()
+  } catch {
+    customDishes.value = []
+  }
+}
+
+// 从"我的菜品"选择 → 填充表单（营养/价格/推荐克重）
+function applyPick(id: number | null): void {
+  const d = customDishes.value.find((x) => x.id === id)
+  if (!d) return
+  form.value.name = d.name
+  form.value.price = d.price || undefined
+  form.value.calories = d.calories || undefined
+  form.value.protein = d.protein || undefined
+  form.value.fat = d.fat || undefined
+  form.value.carbs = d.carbs || undefined
+  form.value.recommended_grams = d.serving_grams || undefined
+}
+
+// ---- 自定义菜品管理弹窗 ----
+const manageVisible = ref(false)
+const manageEditingId = ref<number | null>(null)
+const manageForm = ref({
+  name: '',
+  price: undefined as number | undefined,
+  calories: undefined as number | undefined,
+  protein: undefined as number | undefined,
+  fat: undefined as number | undefined,
+  carbs: undefined as number | undefined,
+  serving_grams: 150 as number,
+})
+
+function resetManageForm(): void {
+  manageEditingId.value = null
+  manageForm.value = {
+    name: '',
+    price: undefined,
+    calories: undefined,
+    protein: undefined,
+    fat: undefined,
+    carbs: undefined,
+    serving_grams: 150,
+  }
+}
+
+async function openManage(): Promise<void> {
+  await loadCustomDishes()
+  resetManageForm()
+  manageVisible.value = true
+}
+
+function editCustomDish(d: CustomDishItem): void {
+  manageEditingId.value = d.id
+  manageForm.value = {
+    name: d.name,
+    price: d.price || undefined,
+    calories: d.calories || undefined,
+    protein: d.protein || undefined,
+    fat: d.fat || undefined,
+    carbs: d.carbs || undefined,
+    serving_grams: d.serving_grams || 150,
+  }
+}
+
+async function manageSubmit(): Promise<void> {
+  if (!manageForm.value.name.trim()) {
+    ElMessage.warning('请输入菜品名称')
+    return
+  }
+  const payload = {
+    name: manageForm.value.name.trim(),
+    price: manageForm.value.price ?? 0,
+    calories: manageForm.value.calories ?? 0,
+    protein: manageForm.value.protein ?? 0,
+    fat: manageForm.value.fat ?? 0,
+    carbs: manageForm.value.carbs ?? 0,
+    serving_grams: manageForm.value.serving_grams || 150,
+  }
+  try {
+    if (manageEditingId.value != null) {
+      await updateCustomDish(manageEditingId.value, payload)
+      ElMessage.success('自定义菜品已更新')
+    } else {
+      await createCustomDish(payload)
+      ElMessage.success('自定义菜品已添加')
+    }
+    resetManageForm()
+    await loadCustomDishes()
+  } catch {
+    ElMessage.error('保存失败，请稍后重试')
+  }
+}
+
+async function manageRemove(d: CustomDishItem): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除自定义菜品「${d.name}」吗？删除后不可恢复`,
+      '删除确认',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  try {
+    await deleteCustomDish(d.id)
+    ElMessage.success('已删除')
+    await loadCustomDishes()
+  } catch {
+    ElMessage.error('删除失败，请稍后重试')
+  }
+}
+
+onMounted(() => {
+  load()
+  loadCustomDishes()
+})
 </script>
 
 <template>
@@ -297,6 +444,22 @@ onMounted(load)
             <el-option v-for="m in MEAL_CHOICES" :key="m.value" :label="m.label" :value="m.value" />
           </el-select>
         </el-form-item>
+        <el-form-item label="我的菜品">
+          <div class="custom-dish-row">
+            <el-select
+              v-model="pickDishId"
+              clearable
+              filterable
+              placeholder="从我的菜品选择，自动填充营养"
+              style="flex: 1"
+              @change="applyPick"
+            >
+              <el-option v-for="d in customDishes" :key="d.id" :label="d.name" :value="d.id" />
+            </el-select>
+            <el-button :icon="Setting" @click="openManage">管理</el-button>
+          </div>
+          <el-checkbox v-model="saveAsCustom" class="save-as-custom">同时保存为我的菜品</el-checkbox>
+        </el-form-item>
         <el-form-item label="菜品名称" required>
           <el-input v-model="form.name" placeholder="请输入菜品名称" />
         </el-form-item>
@@ -332,6 +495,59 @@ onMounted(load)
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" @click="submit">保存</el-button>
       </template>
+    </el-dialog>
+
+    <!-- 我的菜品管理弹窗 -->
+    <el-dialog v-model="manageVisible" title="我的自定义菜品" width="660px" destroy-on-close>
+      <el-form label-width="80px">
+        <el-form-item label="菜品名称" required>
+          <el-input v-model="manageForm.name" placeholder="请输入菜品名称" />
+        </el-form-item>
+        <div class="manage-grid">
+          <el-form-item label="价格">
+            <el-input-number v-model="manageForm.price" :min="0" :max="1000" :precision="2" :step="1" />
+          </el-form-item>
+          <el-form-item label="热量">
+            <el-input-number v-model="manageForm.calories" :min="0" :max="5000" />
+          </el-form-item>
+          <el-form-item label="蛋白质">
+            <el-input-number v-model="manageForm.protein" :min="0" :max="500" :precision="1" />
+          </el-form-item>
+          <el-form-item label="脂肪">
+            <el-input-number v-model="manageForm.fat" :min="0" :max="500" :precision="1" />
+          </el-form-item>
+          <el-form-item label="碳水">
+            <el-input-number v-model="manageForm.carbs" :min="0" :max="500" :precision="1" />
+          </el-form-item>
+          <el-form-item label="克重">
+            <el-input-number v-model="manageForm.serving_grams" :min="0" :max="5000" :precision="1" />
+          </el-form-item>
+        </div>
+      </el-form>
+      <div class="manage-toolbar">
+        <el-button type="primary" :icon="Plus" @click="manageSubmit">
+          {{ manageEditingId != null ? '更新菜品' : '添加菜品' }}
+        </el-button>
+      </div>
+      <el-table :data="customDishes" size="small" empty-text="暂无自定义菜品">
+        <el-table-column prop="name" label="名称" min-width="110" />
+        <el-table-column label="营养" min-width="190">
+          <template #default="{ row }">
+            <span class="nut">{{ row.calories ?? 0 }}kcal</span>
+            <span class="nut">蛋白{{ row.protein ?? 0 }}g</span>
+            <span class="nut">脂{{ row.fat ?? 0 }}g</span>
+            <span class="nut">碳{{ row.carbs ?? 0 }}g</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="price" label="价格" width="60" />
+        <el-table-column prop="serving_grams" label="克重" width="60" />
+        <el-table-column label="操作" width="130" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" :icon="Edit" @click="editCustomDish(row)">编辑</el-button>
+            <el-button size="small" type="danger" plain :icon="Delete" @click="manageRemove(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
     </el-dialog>
   </div>
 </template>
@@ -503,6 +719,35 @@ onMounted(load)
 .form-unit {
   margin-left: 6px;
   color: #909399;
+  font-size: 12px;
+}
+
+/* 我的自定义菜品 */
+.custom-dish-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.save-as-custom {
+  margin-top: 6px;
+}
+
+.manage-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 12px;
+}
+
+.manage-toolbar {
+  margin-bottom: 12px;
+  text-align: right;
+}
+
+.nut {
+  margin-right: 8px;
+  color: #606266;
   font-size: 12px;
 }
 </style>

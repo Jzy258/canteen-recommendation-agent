@@ -37,6 +37,10 @@ export interface FoodRecordPayload {
   price?: number
   calories?: number
   protein?: number
+  fat?: number
+  carbs?: number
+  grams?: number
+  recommended_grams?: number
   remark?: string
 }
 

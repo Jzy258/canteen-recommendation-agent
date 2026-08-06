@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Food } from '@element-plus/icons-vue'
+import { Food, ArrowUp } from '@element-plus/icons-vue'
 import { getDishes, type MenuDish } from '@/api/menu'
 
 const dishes = ref<MenuDish[]>([])
@@ -36,6 +36,9 @@ const fatMax = ref<number | undefined>()
 const carbMin = ref<number | undefined>()  // 碳水区间
 const carbMax = ref<number | undefined>()
 const sortBy = ref('')                     // 排序：cal-asc / cal-desc / price-asc / price-desc
+const page = ref(1)
+const pageSize = ref(12)
+const showBackToTop = ref(false)
 
 // 类别筛选选项（“汤品”匹配 category === '汤'）
 const CATEGORY_OPTIONS = [
@@ -43,6 +46,8 @@ const CATEGORY_OPTIONS = [
   { label: '素菜', value: '素菜' },
   { label: '主食', value: '主食' },
   { label: '汤品', value: '汤' },
+  { label: '水果', value: '水果' },
+  { label: '饮品', value: '饮品' },
 ]
 
 // 辣度映射：根据 flavor_tags 判断（数据多为“辣”，默认按中辣；支持微/中/重辣关键词）
@@ -90,6 +95,26 @@ const filtered = computed(() => {
   return list
 })
 
+const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / pageSize.value)))
+const pageData = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return filtered.value.slice(start, start + pageSize.value)
+})
+
+watch([filtered, pageSize], () => {
+  if (page.value > pageCount.value) {
+    page.value = pageCount.value
+  }
+})
+
+function scrollToTop(): void {
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+function onScroll(): void {
+  showBackToTop.value = window.scrollY > 200
+}
+
 function resetFilters(): void {
   keyword.value = ''
   categorySel.value = []
@@ -119,7 +144,14 @@ async function load(): Promise<void> {
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  window.addEventListener('scroll', onScroll)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('scroll', onScroll)
+})
 </script>
 
 <template>
@@ -205,7 +237,7 @@ onMounted(load)
 
       <!-- 菜品卡片网格 -->
       <div v-loading="loading" class="menu-grid">
-        <div v-for="d in filtered" :key="d.id" class="menu-item">
+        <div v-for="d in pageData" :key="d.id" class="menu-item">
           <div class="mi-cat">{{ d.category }}</div>
           <div class="mi-name">{{ d.name }}</div>
           <div class="mi-price">¥{{ Number(d.price).toFixed(2) }}</div>
@@ -227,6 +259,28 @@ onMounted(load)
       <div v-if="!loading && dishes.length && !filtered.length" class="menu-empty-tip">
         没有找到符合筛选条件的菜品，请调整筛选条件
       </div>
+
+      <div class="menu-pagination">
+        <el-pagination
+          background
+          :current-page="page"
+          :page-size="pageSize"
+          :total="filtered.length"
+          layout="prev, pager, next, sizes, jumper, total"
+          :page-sizes="[6, 12, 18, 24]"
+          @current-change="(p: number) => page = p"
+          @size-change="(s: number) => { pageSize = s; page = 1 }"
+        />
+      </div>
+
+      <el-button
+        v-show="showBackToTop"
+        class="menu-back-top"
+        type="primary"
+        circle
+        :icon="ArrowUp"
+        @click="scrollToTop"
+      />
     </el-card>
   </div>
 </template>
@@ -384,5 +438,18 @@ onMounted(load)
   font-size: 11px;
   background: #e5ecff;
   color: #2457d6;
+}
+
+.menu-pagination {
+  padding: 18px 0 8px;
+  text-align: center;
+}
+
+.menu-back-top {
+  position: fixed;
+  right: 24px;
+  bottom: 84px;
+  z-index: 1200;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
 }
 </style>

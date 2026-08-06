@@ -221,7 +221,8 @@ class DatabaseInterface(ABC):
         ...
 
     @abstractmethod
-    def get_chat_messages(self, session_id: str) -> list[dict]:
+    def get_chat_messages(self, session_id: str,
+                          user_id: Optional[int] = None) -> list[dict]:
         ...
 
     @abstractmethod
@@ -267,12 +268,14 @@ class SQLiteDatabase(DatabaseInterface):
                         self._migrate_v12(conn)
                         self._migrate_v13(conn)
                         self._migrate_v14(conn)
+                        self._migrate_v15(conn)
                     self.init_db()
                     return
                 self._migrate_v11(conn)
                 self._migrate_v12(conn)
                 self._migrate_v13(conn)
                 self._migrate_v14(conn)
+                self._migrate_v15(conn)
             finally:
                 conn.close()
         except sqlite3.Error:
@@ -397,6 +400,29 @@ class SQLiteDatabase(DatabaseInterface):
                        (SELECT serving_grams FROM dish WHERE dish.name = food_record.name), 0)
                    WHERE remark = '（聊天记录）'
                      AND (recommended_grams IS NULL OR recommended_grams = 0)""")
+            conn.commit()
+        except sqlite3.Error:
+            pass
+
+    def _migrate_v15(self, conn):
+        """v1.4 → v1.5 增量迁移：user_profile 增加 region 列（所在城市持久化）+
+        新建 custom_dish 表（用户自定义菜品，按 user_id 隔离）。幂等。"""
+        try:
+            up_cols = {r["name"] for r in conn.execute(
+                "PRAGMA table_info(user_profile)").fetchall()}
+            if "region" not in up_cols:
+                conn.execute("ALTER TABLE user_profile ADD COLUMN region TEXT DEFAULT ''")
+            exists = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='custom_dish'"
+            ).fetchone()
+            if exists is None:
+                schema = open(SCHEMA_PATH, "r", encoding="utf-8").read()
+                for stmt in schema.split(";"):
+                    stmt = stmt.strip()
+                    if not stmt:
+                        continue
+                    if "CREATE TABLE IF NOT EXISTS CUSTOM_DISH" in stmt.upper():
+                        conn.executescript(stmt + ";")
             conn.commit()
         except sqlite3.Error:
             pass
@@ -783,6 +809,78 @@ class SQLiteDatabase(DatabaseInterface):
                 cur = conn.execute(
                     "DELETE FROM food_record WHERE id = ? AND user_id = ?",
                     (record_id, user_id))
+            return cur.rowcount > 0
+
+    # ---- custom_dish：用户自定义菜品（CRUD，按 user_id 隔离）----
+
+    def list_custom_dishes(self, user_id: int | None = None,
+                           limit: int = 200) -> list[dict]:
+        """列出自定义菜品（按更新时间倒序）。user_id=None 返回全部（游客/无主）。"""
+        sql = "SELECT * FROM custom_dish"
+        params: list = []
+        if user_id is not None:
+            sql += " WHERE user_id = ?"
+            params.append(user_id)
+        sql += " ORDER BY updated_at DESC, id DESC LIMIT ?"
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def add_custom_dish(self, name: str, calories: float = 0,
+                        protein: float = 0, carbs: float = 0, fat: float = 0,
+                        price: float = 0, category: str = "自定义",
+                        serving_grams: float = 150,
+                        user_id: int | None = None) -> int:
+        sql = ("""INSERT INTO custom_dish
+                 (name, calories, protein, carbs, fat, price, category, serving_grams, user_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""")
+        with self._connect() as conn:
+            cur = conn.execute(
+                sql, (name, calories, protein, carbs, fat, price, category, serving_grams, user_id))
+            return cur.lastrowid
+
+    def update_custom_dish(self, dish_id: int, user_id: int | None = None,
+                           name: str | None = None, calories: float | None = None,
+                           protein: float | None = None, carbs: float | None = None,
+                           fat: float | None = None, price: float | None = None,
+                           category: str | None = None,
+                           serving_grams: float | None = None) -> bool:
+        """修改自定义菜品。仅更新传入字段；user_id 用于越权校验。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM custom_dish WHERE id = ?", (dish_id,)).fetchone()
+            if row is None:
+                return False
+            if user_id is not None and row["user_id"] != user_id:
+                return False
+            sets, params = [], []
+            if name is not None: sets.append("name = ?"); params.append(name)
+            if calories is not None: sets.append("calories = ?"); params.append(calories)
+            if protein is not None: sets.append("protein = ?"); params.append(protein)
+            if carbs is not None: sets.append("carbs = ?"); params.append(carbs)
+            if fat is not None: sets.append("fat = ?"); params.append(fat)
+            if price is not None: sets.append("price = ?"); params.append(price)
+            if category is not None: sets.append("category = ?"); params.append(category)
+            if serving_grams is not None: sets.append("serving_grams = ?"); params.append(serving_grams)
+            if not sets:
+                return True
+            sets.append("updated_at = datetime('now','localtime')")
+            params.append(dish_id)
+            cur = conn.execute(
+                f"UPDATE custom_dish SET {', '.join(sets)} WHERE id = ?", params)
+            return cur.rowcount > 0
+
+    def delete_custom_dish(self, dish_id: int, user_id: int | None = None) -> bool:
+        """删除自定义菜品。user_id 用于越权校验；None 时任意删。"""
+        with self._connect() as conn:
+            if user_id is None:
+                cur = conn.execute(
+                    "DELETE FROM custom_dish WHERE id = ?", (dish_id,))
+            else:
+                cur = conn.execute(
+                    "DELETE FROM custom_dish WHERE id = ? AND user_id = ?",
+                    (dish_id, user_id))
             return cur.rowcount > 0
 
     def get_meal_record(self, record_id: int) -> Optional[dict]:
@@ -1264,6 +1362,7 @@ class SQLiteDatabase(DatabaseInterface):
                             flavor_preferences: str = "",
                             dietary_restrictions: str = "",
                             health_goals: str = "",
+                            region: str = "",
                             user_id: Optional[int] = None) -> int:
         """保存/更新用户画像。
         仅更新传入的非空字段；空字段保留原值，避免部分更新时丢数据。
@@ -1277,26 +1376,28 @@ class SQLiteDatabase(DatabaseInterface):
                              ("budget_min", budget_min),
                              ("flavor_preferences", flavor_preferences),
                              ("dietary_restrictions", dietary_restrictions),
-                             ("health_goals", health_goals)]:
+                             ("health_goals", health_goals),
+                             ("region", region)]:
                 if val not in (None, "", 0):
                     merged[key] = val
             sql = f"""UPDATE user_profile SET
                       budget = ?, budget_min = ?, flavor_preferences = ?,
-                      dietary_restrictions = ?, health_goals = ?, updated_at = {now}
+                      dietary_restrictions = ?, health_goals = ?, region = ?, updated_at = {now}
                       WHERE id = ?"""
             with self._connect() as conn:
                 conn.execute(sql, (merged["budget"], merged.get("budget_min") or 0,
                                    merged["flavor_preferences"],
                                    merged["dietary_restrictions"], merged["health_goals"],
+                                   merged.get("region", ""),
                                    existing["id"]))
                 return existing["id"]
         else:
             sql = """INSERT INTO user_profile
-                     (budget, budget_min, flavor_preferences, dietary_restrictions, health_goals, user_id)
-                     VALUES (?, ?, ?, ?, ?, ?)"""
+                     (budget, budget_min, flavor_preferences, dietary_restrictions, health_goals, region, user_id)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)"""
             with self._connect() as conn:
                 cur = conn.execute(sql, (budget, budget_min, flavor_preferences,
-                                         dietary_restrictions, health_goals, user_id))
+                                         dietary_restrictions, health_goals, region, user_id))
                 return cur.lastrowid
 
     def update_nutrition_summary(self, summary_json: str,
@@ -1383,13 +1484,24 @@ class SQLiteDatabase(DatabaseInterface):
                 (session_id, role, content))
             return cur.lastrowid
 
-    def get_chat_messages(self, session_id: str) -> list[dict]:
-        """按时间顺序返回会话全部消息。"""
+    def get_chat_messages(self, session_id: str,
+                          user_id: Optional[int] = None) -> list[dict]:
+        """按时间顺序返回会话全部消息。user_id 用于越权校验：
+        登录用户仅能读本人的或历史无主（user_id NULL）会话；None（游客）读任意。"""
         with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT role, content, created_at FROM chat_message "
-                "WHERE session_id = ? ORDER BY id",
-                (session_id,)).fetchall()
+            if user_id is None:
+                rows = conn.execute(
+                    "SELECT role, content, created_at FROM chat_message "
+                    "WHERE session_id = ? ORDER BY id",
+                    (session_id,)).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT cm.role, cm.content, cm.created_at
+                       FROM chat_message cm
+                       JOIN chat_session cs ON cs.session_id = cm.session_id
+                       WHERE cm.session_id = ? AND (cs.user_id = ? OR cs.user_id IS NULL)
+                       ORDER BY cm.id""",
+                    (session_id, user_id)).fetchall()
         return [dict(r) for r in rows]
 
     def list_chat_sessions(self, user_id: Optional[int] = None,

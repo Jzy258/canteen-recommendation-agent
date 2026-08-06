@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeMount } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
-import { ChatDotRound, KnifeFork, Notebook, SwitchButton, TrendCharts, User } from '@element-plus/icons-vue'
+import { ChatDotRound, KnifeFork, Notebook, Setting, SwitchButton, TrendCharts, User } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { isTokenExpired } from '@/utils/jwt'
 
@@ -77,6 +77,10 @@ function goLogin(): void {
           <el-menu-item index="/profile">
             <span class="nav-logo"><el-icon><User /></el-icon></span>
             <span class="nav-label">偏好与设置</span>
+          </el-menu-item>
+          <el-menu-item v-if="authStore.isAdmin" index="/admin">
+            <span class="nav-logo"><el-icon><Setting /></el-icon></span>
+            <span class="nav-label">后台管理</span>
           </el-menu-item>
         </el-menu>
       </nav>

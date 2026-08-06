@@ -2,7 +2,7 @@
 import { nextTick, onActivated, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ChatDotRound, MoreFilled, Plus, User } from '@element-plus/icons-vue'
-import { chat, chatStream, listSessions, getSessionMessages, deleteSession, type ChatSessionItem } from '@/api/chat'
+import { chat, chatStream, listSessions, getSessionMessages, deleteSession, renameSession, type ChatSessionItem } from '@/api/chat'
 import { track } from '@/utils/analytics'
 import DishCard from '@/components/DishCard.vue'
 import MealComboCard from '@/components/MealComboCard.vue'
@@ -342,11 +342,16 @@ async function submitRename(): Promise<void> {
     return
   }
   const sid = renameTarget.value.session_id
-  // 预留：此处调用后端重命名接口（如 renameSession(sid, { title })）
-  const s = sessions.value.find((x) => x.session_id === sid)
-  if (s) s.title = title
-  ElMessage.success('会话已重命名')
-  renameVisible.value = false
+  try {
+    // 持久化到后端（chat_session.title），刷新后保留
+    await renameSession(sid, title)
+    const s = sessions.value.find((x) => x.session_id === sid)
+    if (s) s.title = title
+    ElMessage.success('会话已重命名')
+    renameVisible.value = false
+  } catch {
+    ElMessage.error('重命名失败，请稍后重试')
+  }
 }
 
 // 会话条目“更多(・・・)”菜单命令

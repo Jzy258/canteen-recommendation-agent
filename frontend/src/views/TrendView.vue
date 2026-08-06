@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, ref } from 'vue'
 import { init, graphic, use, type ECharts } from 'echarts/core'
-import { BarChart, LineChart } from 'echarts/charts'
+import { LineChart, BarChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import { ElMessage } from 'element-plus'
@@ -10,26 +10,20 @@ import { getTrend } from '@/api/trend'
 import type { TrendPoint } from '@/types/chat'
 
 // P0 · ECharts 按需引入：仅注册用到的图表/组件，显著降低打包体积
-use([BarChart, LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
+use([LineChart, BarChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
 
-// 两个独立图表：热量 / 蛋白质·碳水·脂肪
+// 四个独立图表：热量趋势 / 宏量趋势 / 日均热量 / 日均宏量
 const calChartRef = ref<HTMLDivElement>()
 const macroChartRef = ref<HTMLDivElement>()
-const compareChartRef = ref<HTMLDivElement>()
+const avgCalChartRef = ref<HTMLDivElement>()
+const avgMacroChartRef = ref<HTMLDivElement>()
 const days = ref(7)
 const loading = ref(false)
 const trend = ref<TrendPoint[]>([])
 let calChart: ECharts | null = null
 let macroChart: ECharts | null = null
-let compareChart: ECharts | null = null
-
-// 营养日均对比所对应的当天日期（数据截止日）
-const latestDate = computed(() => {
-  const last = trend.value[trend.value.length - 1]
-  if (!last || !last.date) return ''
-  const [, m, d] = last.date.split('-')
-  return `${Number(m)}月${Number(d)}日`
-})
+let avgCalChart: ECharts | null = null
+let avgMacroChart: ECharts | null = null
 
 // C10 · 汇总统计
 const stats = computed(() => {
@@ -50,19 +44,15 @@ const stats = computed(() => {
   }
 })
 
-// 图表实例管理：容器常驻，若 DOM 变化则销毁重建，避免空白
-function ensureChart(
-  refEl: HTMLDivElement | undefined,
-  holder: { chart: ECharts | null },
-): ECharts | null {
-  if (!refEl) return holder.chart
-  if (holder.chart && holder.chart.getDom() !== refEl) {
-    holder.chart.dispose()
-    holder.chart = null
-  }
-  holder.chart ??= init(refEl)
-  return holder.chart
-}
+const avgStats = computed(() => {
+  const pts = trend.value.filter((p) => p.dish_count > 0)
+  const n = pts.length
+  const avgCal = n ? Math.round(pts.reduce((s, p) => s + p.total_calories, 0) / n) : 0
+  const avgProtein = n ? Math.round(pts.reduce((s, p) => s + p.total_protein, 0) / n) : 0
+  const avgCarbs = n ? Math.round(pts.reduce((s, p) => s + p.total_carbs, 0) / n) : 0
+  const avgFat = n ? Math.round(pts.reduce((s, p) => s + p.total_fat, 0) / n) : 0
+  return { avgCal, avgProtein, avgCarbs, avgFat }
+})
 
 // 营养洞察（建议3）：基于近 N 天数据给出规则化结论，帮助用户快速理解趋势
 // （纯前端规则，不依赖 LLM；后续可升级为 Agent 生成）
@@ -91,6 +81,20 @@ const insight = computed<{ level: InsightLevel; text: string } | null>(() => {
 
 function insightIcon(level: InsightLevel): string {
   return level === 'success' ? '✅' : level === 'warning' ? '⚠️' : '🔴'
+}
+
+// 图表实例管理：容器常驻，若 DOM 变化则销毁重建，避免空白
+function ensureChart(
+  refEl: HTMLDivElement | undefined,
+  holder: { chart: ECharts | null },
+): ECharts | null {
+  if (!refEl) return holder.chart
+  if (holder.chart && holder.chart.getDom() !== refEl) {
+    holder.chart.dispose()
+    holder.chart = null
+  }
+  holder.chart ??= init(refEl)
+  return holder.chart
 }
 
 // 公共 tooltip
@@ -214,56 +218,89 @@ function renderMacroChart(points: TrendPoint[]): void {
   })
 }
 
-// 建议6：近 N 天各营养日均 vs 目标 —— 横向条形图（一眼看出营养是否达标）
-function renderCompareChart(points: TrendPoint[]): void {
-  const chart = ensureChart(compareChartRef.value, { chart: compareChart })
+function renderAvgCalChart(): void {
+  const chart = ensureChart(avgCalChartRef.value, { chart: avgCalChart })
   if (!chart) return
-  compareChart = chart
-  const pts = points.filter((p) => p.dish_count > 0)
-  const n = pts.length || 1
-  const avg = (key: 'total_calories' | 'total_protein' | 'total_carbs' | 'total_fat'): number =>
-    Math.round(pts.reduce((s, p) => s + (p[key] || 0), 0) / n)
-  // 一份均衡食堂餐的近似目标值（可按需调整）
-  const items = [
-    { name: '热量(kcal)', value: avg('total_calories'), target: 2000, color: '#32b16c' },
-    { name: '蛋白质(g)', value: avg('total_protein'), target: 60, color: '#288e56' },
-    { name: '碳水(g)', value: avg('total_carbs'), target: 260, color: '#e6a23c' },
-    { name: '脂肪(g)', value: avg('total_fat'), target: 60, color: '#f56c6c' },
-  ]
+  avgCalChart = chart
   chart.setOption({
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    legend: {
-      data: ['日均摄入', '目标参考'],
-      bottom: 4, left: 'center',
-      icon: 'circle', itemWidth: 10, itemHeight: 10,
-      textStyle: { color: '#606266', fontSize: 12 },
+    tooltip: {
+      trigger: 'item',
+      formatter: '{b}: {c} kcal',
+      backgroundColor: 'rgba(255,255,255,0.96)',
+      borderColor: '#d6efe2',
+      borderWidth: 1,
+      padding: [10, 14],
+      textStyle: { color: '#303133', fontSize: 13 },
     },
-    grid: { left: 96, right: 52, top: 16, bottom: 44 },
     xAxis: {
-      type: 'value',
+      type: 'category' as const,
+      data: ['日均热量'],
+      axisLine: { lineStyle: { color: '#dcdfe6' } },
+      axisTick: { show: false },
       axisLabel: { color: '#909399', fontSize: 12 },
-      splitLine: { lineStyle: { color: '#f0f2f5', type: 'dashed' } },
     },
     yAxis: {
-      type: 'category',
-      data: items.map((i) => i.name),
-      axisLabel: { color: '#606266', fontSize: 12 },
+      type: 'value' as const,
+      axisLabel: { color: '#909399', fontSize: 12 },
+      splitLine: { lineStyle: { color: '#f0f2f5', type: 'dashed' as const } },
+      axisLine: { show: false },
     },
+    grid: { left: 26, right: 18, top: 28, bottom: 34 },
     series: [
       {
-        name: '日均摄入',
+        name: '日均热量',
         type: 'bar',
-        barWidth: 14,
-        data: items.map((i) => ({ value: i.value, itemStyle: { color: i.color, borderRadius: [0, 4, 4, 0] } })),
-        label: { show: true, position: 'right', color: '#606266', fontSize: 11 },
+        data: [avgStats.value.avgCal],
+        itemStyle: { color: '#32b16c' },
+        barWidth: 40,
+        emphasis: { itemStyle: { color: '#2a9c5f' } },
       },
-      {
-        name: '目标参考',
-        type: 'bar',
-        barWidth: 14,
-        data: items.map((i) => i.target),
-        itemStyle: { color: '#eef0f3', borderRadius: [0, 4, 4, 0] },
-      },
+    ],
+  })
+}
+
+function renderAvgMacroChart(): void {
+  const chart = ensureChart(avgMacroChartRef.value, { chart: avgMacroChart })
+  if (!chart) return
+  avgMacroChart = chart
+  chart.setOption({
+    tooltip: {
+      trigger: 'axis' as const,
+      axisPointer: { type: 'shadow' as const },
+      backgroundColor: 'rgba(255,255,255,0.96)',
+      borderColor: '#d6efe2',
+      borderWidth: 1,
+      padding: [10, 14],
+      textStyle: { color: '#303133', fontSize: 13 },
+    },
+    legend: {
+      data: ['蛋白质(g)', '碳水(g)', '脂肪(g)'],
+      bottom: 8,
+      left: 'center' as const,
+      itemGap: 18,
+      icon: 'circle' as const,
+      itemWidth: 10,
+      itemHeight: 10,
+      textStyle: { color: '#606266', fontSize: 12 },
+    },
+    xAxis: {
+      type: 'category' as const,
+      data: ['日均营养'],
+      axisLine: { lineStyle: { color: '#dcdfe6' } },
+      axisTick: { show: false },
+      axisLabel: { color: '#909399', fontSize: 12 },
+    },
+    yAxis: {
+      type: 'value' as const,
+      axisLabel: { color: '#909399', fontSize: 12 },
+      splitLine: { lineStyle: { color: '#f0f2f5', type: 'dashed' as const } },
+      axisLine: { show: false },
+    },
+    grid: { left: 26, right: 18, top: 28, bottom: 60 },
+    series: [
+      { name: '蛋白质(g)', type: 'bar', data: [avgStats.value.avgProtein], itemStyle: { color: '#288e56' }, barWidth: 18 },
+      { name: '碳水(g)', type: 'bar', data: [avgStats.value.avgCarbs], itemStyle: { color: '#e6a23c' }, barWidth: 18 },
+      { name: '脂肪(g)', type: 'bar', data: [avgStats.value.avgFat], itemStyle: { color: '#f56c6c' }, barWidth: 18 },
     ],
   })
 }
@@ -275,19 +312,21 @@ async function load(): Promise<void> {
   } catch {
     ElMessage.error('趋势数据加载失败，请确认后端已启动')
   } finally {
-    // 先结束加载态，等图表容器渲染后再初始化两个图表
+    // 先结束加载态，等图表容器渲染后再初始化图表
     loading.value = false
     await nextTick()
     renderCalChart(trend.value)
     renderMacroChart(trend.value)
-    renderCompareChart(trend.value)
+    renderAvgCalChart()
+    renderAvgMacroChart()
   }
 }
 
 function onResize(): void {
   calChart?.resize()
   macroChart?.resize()
-  compareChart?.resize()
+  avgCalChart?.resize()
+  avgMacroChart?.resize()
 }
 
 onMounted(() => {
@@ -299,16 +338,19 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)
   calChart?.dispose()
   macroChart?.dispose()
-  compareChart?.dispose()
+  avgCalChart?.dispose()
+  avgMacroChart?.dispose()
 })
 
-// KeepAlive 激活（切回趋势页）时校正两个图表尺寸
+// KeepAlive 激活（切回趋势页）时校正图表尺寸
 onActivated(() => {
   calChart?.resize()
   macroChart?.resize()
-  compareChart?.resize()
+  avgCalChart?.resize()
+  avgMacroChart?.resize()
 })
 </script>
+
 <template>
   <div class="trend-page">
     <!-- C10 · 汇总统计卡 -->
@@ -357,30 +399,37 @@ onActivated(() => {
         <span>{{ insight.text }}</span>
       </div>
 
-      <!-- 图表一：仅热量趋势 -->
-      <div class="trend-chart-block">
-        <div class="block-title">🔥 热量趋势</div>
-        <div class="trend-chart-wrap">
-          <div class="trend-chart" ref="calChartRef" />
-          <el-skeleton v-if="loading" :rows="5" animated class="trend-skeleton" />
+      <div class="trend-charts-grid">
+        <div class="trend-chart-block">
+          <div class="block-title">🔥 热量趋势</div>
+          <div class="trend-chart-wrap">
+            <div class="trend-chart" ref="calChartRef" />
+            <el-skeleton v-if="loading" :rows="5" animated class="trend-skeleton" />
+          </div>
         </div>
-      </div>
 
-      <!-- 图表二：蛋白质 / 碳水 / 脂肪 -->
-      <div class="trend-chart-block">
-        <div class="block-title">🍗 蛋白质 / 碳水 / 脂肪</div>
-        <div class="trend-chart-wrap">
-          <div class="trend-chart" ref="macroChartRef" />
-          <el-skeleton v-if="loading" :rows="5" animated class="trend-skeleton" />
+        <div class="trend-chart-block">
+          <div class="block-title">🍗 蛋白质 / 碳水 / 脂肪</div>
+          <div class="trend-chart-wrap">
+            <div class="trend-chart" ref="macroChartRef" />
+            <el-skeleton v-if="loading" :rows="5" animated class="trend-skeleton" />
+          </div>
         </div>
-      </div>
 
-      <!-- 图表三：营养日均对比（建议6，横向条形图） -->
-      <div class="trend-chart-block">
-        <div class="block-title">📊 营养日均对比<span v-if="latestDate" class="block-date">{{ latestDate }}</span></div>
-        <div class="trend-chart-wrap">
-          <div class="trend-chart" ref="compareChartRef" />
-          <el-skeleton v-if="loading" :rows="5" animated class="trend-skeleton" />
+        <div class="trend-chart-block">
+          <div class="block-title">📊 日均热量</div>
+          <div class="trend-chart-wrap trend-chart-wrap-sm">
+            <div class="trend-chart" ref="avgCalChartRef" />
+            <el-skeleton v-if="loading" :rows="5" animated class="trend-skeleton" />
+          </div>
+        </div>
+
+        <div class="trend-chart-block">
+          <div class="block-title">📊 日均蛋白质 / 碳水 / 脂肪</div>
+          <div class="trend-chart-wrap trend-chart-wrap-sm">
+            <div class="trend-chart" ref="avgMacroChartRef" />
+            <el-skeleton v-if="loading" :rows="5" animated class="trend-skeleton" />
+          </div>
         </div>
       </div>
 
@@ -391,6 +440,7 @@ onActivated(() => {
     </el-card>
   </div>
 </template>
+
 <style scoped>
 .trend-page {
   max-width: 860px;
@@ -516,21 +566,19 @@ onActivated(() => {
   line-height: 30px;
 }
 
-/* 图表块：两块分隔 */
-.trend-chart-block {
+/* 图表网格：2x2 布局 */
+.trend-charts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
   margin-bottom: 18px;
 }
 
-.trend-chart-block + .trend-chart-block {
-  border-top: 1px dashed var(--el-color-primary-light-8);
-  padding-top: 16px;
-}
-
-.block-date {
-  font-size: 12px;
-  font-weight: 500;
-  color: #909399;
-  margin-left: 8px;
+.trend-chart-block {
+  background: #fff;
+  border: 1px solid var(--el-color-primary-light-8);
+  border-radius: 16px;
+  padding: 16px;
 }
 
 .block-title {
@@ -546,6 +594,10 @@ onActivated(() => {
   height: 320px;
 }
 
+.trend-chart-wrap.trend-chart-wrap-sm {
+  height: 280px;
+}
+
 .trend-chart {
   width: 100%;
   height: 100%;
@@ -557,5 +609,14 @@ onActivated(() => {
   padding: 24px 12px;
   background: #fff;
   z-index: 1;
+}
+
+@media screen and (max-width: 960px) {
+  .trend-page {
+    padding: 12px;
+  }
+  .trend-charts-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS user_profile (
     flavor_preferences      TEXT    DEFAULT '',           -- 口味偏好，逗号分隔
     dietary_restrictions    TEXT    DEFAULT '',           -- 忌口/过敏，逗号分隔
     health_goals            TEXT    DEFAULT '',           -- 营养目标：高蛋白/控油/控糖/增肌/减脂
+    region                  TEXT    DEFAULT '',           -- 所在城市（持久化，用于天气推荐）
     -- 历史营养汇总（JSON），如 {"avg_calories": 650, "avg_protein": 28, ...}
     nutrition_summary       TEXT    DEFAULT '{}',
     user_id                 INTEGER REFERENCES app_user(id) ON DELETE CASCADE,  -- v1.1 画像归属用户（NULL=匿名/历史）
@@ -257,3 +258,21 @@ CREATE TABLE IF NOT EXISTS food_record (
 );
 CREATE INDEX IF NOT EXISTS idx_food_record_date ON food_record(date);
 CREATE INDEX IF NOT EXISTS idx_food_record_user ON food_record(user_id);
+
+
+-- 8. custom_dish — 用户自定义菜品（按 user_id 隔离；user_id NULL=游客/无主）
+CREATE TABLE IF NOT EXISTS custom_dish (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT    NOT NULL,                     -- 菜品名称
+    calories      REAL    NOT NULL DEFAULT 0,           -- 热量 kcal/份
+    protein       REAL    NOT NULL DEFAULT 0,           -- 蛋白质 g/份
+    carbs         REAL    NOT NULL DEFAULT 0,           -- 碳水化合物 g/份
+    fat           REAL    NOT NULL DEFAULT 0,           -- 脂肪 g/份
+    price         REAL    NOT NULL DEFAULT 0,           -- 价格（元）
+    category      TEXT    DEFAULT '自定义',             -- 类别：荤菜/素菜/汤/主食/水果/饮品/自定义
+    serving_grams REAL    DEFAULT 150,                  -- 标准份量克数 g
+    user_id       INTEGER REFERENCES app_user(id) ON DELETE CASCADE,  -- 归属用户（NULL=游客）
+    created_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    updated_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_custom_dish_user ON custom_dish(user_id);

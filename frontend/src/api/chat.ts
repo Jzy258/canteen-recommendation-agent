@@ -35,6 +35,10 @@ export async function deleteSession(sessionId: string): Promise<void> {
   await http.delete(`/sessions/${sessionId}`)
 }
 
+export async function renameSession(sessionId: string, title: string): Promise<void> {
+  await http.put(`/sessions/${sessionId}`, { title })
+}
+
 export async function chatStream(
   req: ChatRequest,
   onEvent: (event: StreamEvent) => void,
