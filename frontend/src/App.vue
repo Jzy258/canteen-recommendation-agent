@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeMount } from 'vue'
+import { computed, onBeforeMount, ref } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
-import { ChatDotRound, InfoFilled, KnifeFork, Notebook, Setting, SwitchButton, TrendCharts, User } from '@element-plus/icons-vue'
+import { ChatDotRound, InfoFilled, KnifeFork, Message, Notebook, Setting, SwitchButton, TrendCharts, User } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import { isTokenExpired } from '@/utils/jwt'
+import { http } from '@/api/client'
 
 const authStore = useAuthStore()
 const route = useRoute()
@@ -30,6 +32,36 @@ function goLogin(): void {
 
 function goAbout(): void {
   window.location.href = `${import.meta.env.BASE_URL}about`
+}
+
+// 意见反馈
+const feedbackVisible = ref(false)
+const feedbackContent = ref('')
+const feedbackContact = ref('')
+const feedbackSubmitting = ref(false)
+
+function openFeedback(): void {
+  feedbackContent.value = ''
+  feedbackContact.value = ''
+  feedbackVisible.value = true
+}
+
+async function submitFeedback(): Promise<void> {
+  const content = feedbackContent.value.trim()
+  if (!content) {
+    ElMessage.warning('请输入反馈内容')
+    return
+  }
+  feedbackSubmitting.value = true
+  try {
+    await http.post('/feedback', { content, contact: feedbackContact.value.trim() })
+    ElMessage.success('感谢您的反馈！')
+    feedbackVisible.value = false
+  } catch {
+    ElMessage.error('提交失败，请稍后重试')
+  } finally {
+    feedbackSubmitting.value = false
+  }
 }
 </script>
 
@@ -107,6 +139,10 @@ function goAbout(): void {
                   <el-icon style="margin-right: 4px"><InfoFilled /></el-icon>
                   关于
                 </el-dropdown-item>
+                <el-dropdown-item @click="openFeedback">
+                  <el-icon style="margin-right: 4px"><Message /></el-icon>
+                  反馈
+                </el-dropdown-item>
                 <el-dropdown-item @click="onLogout">
                   <el-icon style="margin-right: 4px"><SwitchButton /></el-icon>
                   退出登录
@@ -134,6 +170,22 @@ function goAbout(): void {
         </keep-alive>
       </router-view>
     </main>
+
+    <!-- 意见反馈弹窗 -->
+    <el-dialog v-model="feedbackVisible" title="意见反馈" width="480px">
+      <el-form label-width="80px">
+        <el-form-item label="反馈内容" required>
+          <el-input v-model="feedbackContent" type="textarea" :rows="4" placeholder="请描述您的建议、问题或改进想法" />
+        </el-form-item>
+        <el-form-item label="联系方式">
+          <el-input v-model="feedbackContact" placeholder="选填：邮箱 / QQ / 微信，方便我们回复您" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="feedbackVisible = false">取消</el-button>
+        <el-button type="primary" :loading="feedbackSubmitting" @click="submitFeedback">提交反馈</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 

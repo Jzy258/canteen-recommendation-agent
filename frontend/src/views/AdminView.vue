@@ -6,8 +6,9 @@ import {
   getAdminStats, listAdminUsers, updateAdminUser, resetUserPassword,
   listAdminDishes, createAdminDish, updateAdminDish, deleteAdminDish,
   getAdminTokenUsage,
+  listAdminFeedback, deleteAdminFeedback,
   type AdminStats, type AdminUser, type AdminDish, type DishPayload,
-  type AdminTokenUsageItem,
+  type AdminTokenUsageItem, type AdminFeedbackItem,
 } from '@/api/admin'
 
 const activeTab = ref('overview')
@@ -142,9 +143,36 @@ async function loadTokenUsage(): Promise<void> {
   }
 }
 
+// ===================== 反馈管理 =====================
+const feedbackList = ref<AdminFeedbackItem[]>([])
+const feedbackKeyword = ref('')
+async function loadFeedback(): Promise<void> {
+  loading.value = true
+  try {
+    const r = await listAdminFeedback(feedbackKeyword.value)
+    feedbackList.value = r.items
+  } finally {
+    loading.value = false
+  }
+}
+async function removeFeedback(f: AdminFeedbackItem): Promise<void> {
+  try {
+    await ElMessageBox.confirm('确定删除这条反馈吗？', '删除确认', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
+    await deleteAdminFeedback(f.id)
+    ElMessage.success('反馈已删除')
+    await loadFeedback()
+  } catch {
+    ElMessage.error('删除失败，请稍后重试')
+  }
+}
+
 // ===================== 初始化 =====================
 onMounted(async () => {
-  await Promise.all([loadStats(), loadDishes(), loadUsers(), loadTokenUsage()])
+  await Promise.all([loadStats(), loadDishes(), loadUsers(), loadTokenUsage(), loadFeedback()])
   const onScroll = () => { showBackToTop.value = window.scrollY > 200 }
   window.addEventListener('scroll', onScroll)
   // 初始化显示状态
@@ -294,6 +322,31 @@ onMounted(async () => {
                 <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">
                   {{ row.status === 1 ? '启用' : '禁用' }}
                 </el-tag>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-tab-pane>
+
+        <!-- 反馈管理 -->
+        <el-tab-pane label="反馈管理" name="feedback">
+          <div class="toolbar">
+            <el-input v-model="feedbackKeyword" placeholder="搜索反馈内容/联系方式" clearable style="width: 220px" @change="loadFeedback" @clear="loadFeedback" />
+            <el-button :icon="Refresh" @click="loadFeedback">刷新</el-button>
+          </div>
+          <el-table v-loading="loading" :data="feedbackList" stripe size="small" empty-text="暂无反馈">
+            <el-table-column prop="id" label="ID" width="60" />
+            <el-table-column prop="content" label="反馈内容" min-width="220" show-overflow-tooltip />
+            <el-table-column prop="contact" label="联系方式" width="150" />
+            <el-table-column label="提交用户" width="120">
+              <template #default="{ row }">
+                <span v-if="row.user_id">{{ row.display_name || row.username }}</span>
+                <el-tag v-else size="small" type="info">游客</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="created_at" label="提交时间" width="160" />
+            <el-table-column label="操作" width="90" fixed="right">
+              <template #default="{ row }">
+                <el-button size="small" type="danger" plain :icon="Delete" @click="removeFeedback(row)">删除</el-button>
               </template>
             </el-table-column>
           </el-table>

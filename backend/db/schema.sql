@@ -276,3 +276,14 @@ CREATE TABLE IF NOT EXISTS custom_dish (
     updated_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE INDEX IF NOT EXISTS idx_custom_dish_user ON custom_dish(user_id);
+
+
+-- 9. feedback — 用户反馈
+CREATE TABLE IF NOT EXISTS feedback (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    content     TEXT    NOT NULL,                     -- 反馈内容
+    contact     TEXT    DEFAULT '',                   -- 联系方式（邮箱/QQ/微信，选填）
+    user_id     INTEGER REFERENCES app_user(id) ON DELETE SET NULL,  -- 提交用户（NULL=游客）
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_user ON feedback(user_id);

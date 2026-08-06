@@ -100,6 +100,22 @@ def reset_password(user_id: int, req: ResetPasswordRequest):
 # ===================== Token 用量 =====================
 
 
+@router.get("/feedback", dependencies=[Depends(require_admin)])
+def list_feedback(keyword: str = "", limit: int = Query(100, ge=1, le=200),
+                  offset: int = Query(0, ge=0)):
+    """反馈列表（分页 + 内容/联系方式搜索）。"""
+    rows = get_db().list_feedback(keyword=keyword, limit=limit, offset=offset)
+    return {"items": rows, "count": len(rows)}
+
+
+@router.delete("/feedback/{feedback_id}", dependencies=[Depends(require_admin)])
+def delete_feedback(feedback_id: int):
+    """删除一条反馈。"""
+    if not get_db().delete_feedback(feedback_id):
+        raise HTTPException(status_code=404, detail="反馈不存在")
+    return {"ok": True}
+
+
 @router.get("/token-usage", dependencies=[Depends(require_admin)])
 def token_usage():
     """每个用户的 Token 用量（按 user_id 累计，不随进程重启清零；0 用量的用户也列出）。"""

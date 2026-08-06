@@ -274,6 +274,7 @@ class SQLiteDatabase(DatabaseInterface):
                         self._migrate_v13(conn)
                         self._migrate_v14(conn)
                         self._migrate_v15(conn)
+                        self._migrate_v16(conn)
                     self.init_db()
                     return
                 self._migrate_v11(conn)
@@ -281,6 +282,7 @@ class SQLiteDatabase(DatabaseInterface):
                 self._migrate_v13(conn)
                 self._migrate_v14(conn)
                 self._migrate_v15(conn)
+                self._migrate_v16(conn)
             finally:
                 conn.close()
         except sqlite3.Error:
@@ -427,6 +429,24 @@ class SQLiteDatabase(DatabaseInterface):
                     if not stmt:
                         continue
                     if "CREATE TABLE IF NOT EXISTS CUSTOM_DISH" in stmt.upper():
+                        conn.executescript(stmt + ";")
+            conn.commit()
+        except sqlite3.Error:
+            pass
+
+    def _migrate_v16(self, conn):
+        """v1.5 → v1.6 增量迁移：新增 feedback 表（用户反馈）。幂等。"""
+        try:
+            exists = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='feedback'"
+            ).fetchone()
+            if exists is None:
+                schema = open(SCHEMA_PATH, "r", encoding="utf-8").read()
+                for stmt in schema.split(";"):
+                    stmt = stmt.strip()
+                    if not stmt:
+                        continue
+                    if "CREATE TABLE IF NOT EXISTS FEEDBACK" in stmt.upper():
                         conn.executescript(stmt + ";")
             conn.commit()
         except sqlite3.Error:
@@ -1555,6 +1575,39 @@ class SQLiteDatabase(DatabaseInterface):
                     "UPDATE chat_session SET title = ?, updated_at = datetime('now','localtime') "
                     "WHERE session_id = ? AND (user_id = ? OR user_id IS NULL)",
                     (title, session_id, user_id))
+            return cur.rowcount > 0
+
+    # ---- feedback：用户反馈 ----
+
+    def add_feedback(self, content: str, contact: str = "",
+                     user_id: int | None = None) -> int:
+        """记录一条用户反馈。"""
+        sql = "INSERT INTO feedback (content, contact, user_id) VALUES (?, ?, ?)"
+        with self._connect() as conn:
+            cur = conn.execute(sql, (content, contact, user_id))
+            return cur.lastrowid
+
+    def list_feedback(self, keyword: str = "", limit: int = 100,
+                      offset: int = 0) -> list[dict]:
+        """列出反馈（含提交用户信息），按时间倒序。"""
+        sql = ("""SELECT f.*, u.username, u.display_name
+                 FROM feedback f LEFT JOIN app_user u ON f.user_id = u.id
+                 WHERE 1=1""")
+        params: list = []
+        if keyword:
+            sql += " AND (f.content LIKE ? OR f.contact LIKE ?)"
+            params += [f"%{keyword}%", f"%{keyword}%"]
+        sql += " ORDER BY f.id DESC LIMIT ? OFFSET ?"
+        params += [limit, offset]
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_feedback(self, feedback_id: int) -> bool:
+        """删除一条反馈。"""
+        with self._connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM feedback WHERE id = ?", (feedback_id,))
             return cur.rowcount > 0
 
 

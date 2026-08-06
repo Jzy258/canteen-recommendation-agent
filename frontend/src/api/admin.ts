@@ -108,3 +108,25 @@ export async function getAdminTokenUsage() {
   const { data } = await http.get<{ items: AdminTokenUsageItem[]; total_tokens: number }>('/admin/token-usage')
   return data
 }
+
+// ===== 反馈管理 =====
+export interface AdminFeedbackItem {
+  id: number
+  content: string
+  contact: string
+  user_id: number | null
+  username: string | null
+  display_name: string | null
+  created_at: string
+}
+
+export async function listAdminFeedback(keyword = '', limit = 100, offset = 0) {
+  const { data } = await http.get<{ items: AdminFeedbackItem[]; count: number }>('/admin/feedback', {
+    params: { keyword, limit, offset },
+  })
+  return data
+}
+
+export async function deleteAdminFeedback(feedbackId: number): Promise<void> {
+  await http.delete(`/admin/feedback/${feedbackId}`)
+}

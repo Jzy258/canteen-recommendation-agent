@@ -481,6 +481,26 @@ def update_profile(req: ProfileUpdateRequest,
     return {"ok": True}
 
 
+class FeedbackRequest(BaseModel):
+    content: str
+    contact: str = ""
+
+
+@app.post("/feedback", status_code=201)
+def create_feedback(req: FeedbackRequest,
+                    user: dict | None = Depends(get_optional_user)):
+    """提交用户反馈（登录用户记归属；游客匿名）。"""
+    content = (req.content or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="反馈内容不能为空")
+    if len(content) > 2000:
+        raise HTTPException(status_code=400, detail="反馈内容过长")
+    from db import get_db
+    uid = user["id"] if user else None
+    fid = get_db().add_feedback(content, (req.contact or "").strip()[:200], user_id=uid)
+    return {"id": fid, "ok": True}
+
+
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest, user: dict | None = Depends(get_optional_user)):
     if not req.message or not req.message.strip():
