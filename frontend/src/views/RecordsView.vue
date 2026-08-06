@@ -750,4 +750,28 @@ onMounted(() => {
   color: #606266;
   font-size: 12px;
 }
+/* ===== 移动端适配 ===== */
+@media (max-width: 768px) {
+  .records-page {
+    padding: 10px;
+  }
+  .records-card {
+    border-radius: 12px;
+  }
+  .records-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .filter-row {
+    gap: 12px;
+  }
+  .record-item {
+    gap: 8px;
+    padding: 8px 10px;
+  }
+  .ri-ops {
+    margin-left: 0;
+    width: 100%;
+  }
+}
 </style>

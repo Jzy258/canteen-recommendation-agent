@@ -475,4 +475,27 @@ onMounted(async () => {
 .row-actions--left {
   justify-content: flex-start;
 }
+/* ===== 移动端适配 ===== */
+@media (max-width: 768px) {
+  .admin-page {
+    padding: 10px;
+  }
+  .admin-card {
+    border-radius: 12px;
+  }
+  .stat-grid {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 10px;
+  }
+  .toolbar {
+    gap: 8px;
+  }
+  /* 表格横向滚动 */
+  .admin-card :deep(.el-table) {
+    min-width: 0;
+  }
+  .admin-card :deep(.el-table__body-wrapper) {
+    overflow-x: auto;
+  }
+}
 </style>

@@ -69,3 +69,17 @@ body {
   display: flex;
   justify-content: center;
 }
+
+/* ===== 移动端全局适配 ===== */
+@media (max-width: 768px) {
+  .el-dialog {
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px);
+  }
+  .el-message-box {
+    width: calc(100vw - 32px) !important;
+  }
+  .el-dialog__body {
+    padding: 12px 16px;
+  }
+}

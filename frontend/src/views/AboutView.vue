@@ -226,4 +226,26 @@ onMounted(async () => {
 .contact-icon {
   color: var(--el-color-primary);
 }
+/* ===== 移动端适配 ===== */
+@media (max-width: 768px) {
+  .about-page {
+    padding: 10px;
+  }
+  .about-card {
+    border-radius: 12px;
+  }
+  .about-meta {
+    gap: 8px;
+  }
+  .about-logo {
+    font-size: 44px;
+  }
+  .about-title {
+    font-size: 22px;
+  }
+  .feature-grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 10px;
+  }
+}
 </style>

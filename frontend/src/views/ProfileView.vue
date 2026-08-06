@@ -50,4 +50,13 @@ onMounted(() => {
 .profile-title .el-icon {
   color: var(--el-color-primary);
 }
+/* ===== 移动端适配 ===== */
+@media (max-width: 768px) {
+  .profile-page {
+    padding: 10px;
+  }
+  .profile-card {
+    border-radius: 12px;
+  }
+}
 </style>

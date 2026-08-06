@@ -68,24 +68,6 @@ async function submitFeedback(): Promise<void> {
 <template>
   <div class="app-shell">
     <header v-if="!isAuthPage" class="app-header">
-      <div class="app-brand">
-        <span class="brand-logo">
-          <el-icon :size="18"><KnifeFork /></el-icon>
-        </span>
-        <span class="brand-name">食堂推荐 Agent</span>
-        <a
-          href="https://github.com/Jzy258/canteen-recommendation-agent"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="brand-github"
-          title="GitHub 仓库"
-        >
-          <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true">
-            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
-          </svg>
-        </a>
-      </div>
-
       <nav class="app-nav-wrap">
         <el-menu
           mode="horizontal"
@@ -125,7 +107,7 @@ async function submitFeedback(): Promise<void> {
 
       <div v-if="!isAuthPage" class="app-user">
         <template v-if="authStore.isLoggedIn">
-          <el-dropdown>
+          <el-dropdown trigger="click">
             <span class="user-trigger">
               <el-icon :size="16"><User /></el-icon>
               <span class="user-name">{{ authStore.displayName }}</span>
@@ -201,7 +183,9 @@ async function submitFeedback(): Promise<void> {
   position: sticky;
   top: 0;
   z-index: 10;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr);
+  column-gap: 24px;
   align-items: center;
   padding: 0 24px;
   background: rgba(255, 255, 255, 0.92);
@@ -210,77 +194,43 @@ async function submitFeedback(): Promise<void> {
   border-bottom: 1px solid #eef3f0;
 }
 
-/* 品牌区 */
-.app-brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 190px;
-}
-
-.brand-logo {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #32b16c, #288e56);
-  color: #fff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 3px 8px rgba(50, 177, 108, 0.35);
-}
-
-.brand-name {
-  font-weight: 700;
-  font-size: 16px;
-  color: #1f2d27;
-  letter-spacing: 0.5px;
-  white-space: nowrap;
-}
-
-/* GitHub 仓库链接图标 */
-.brand-github {
-  display: inline-flex;
-  align-items: center;
-  color: #909399;
-  transition: color 0.2s, transform 0.2s;
-}
-
-.brand-github:hover {
-  color: #303133;
-  transform: translateY(-1px);
-}
-
 /* 菜单整体居中 */
 .app-nav-wrap {
-  flex: 1;
   display: flex;
-  justify-content: center;
+  grid-column: 2;
 }
 
 .app-nav {
   border-bottom: none;
+  height: 56px;
+  flex: 1;
+  justify-content: center;
 }
 
 .app-nav .el-menu-item {
+  flex: 1;
   height: 56px;
-  line-height: 56px;
+  padding: 0 12px;
+  line-height: normal;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 1px;
 }
 
 /* 每项专属 logo 徽标 */
 .app-nav .el-menu-item .nav-logo {
   width: 28px;
   height: 28px;
-  border-radius: 8px;
-  background: var(--el-color-primary-light-9);
-  color: var(--el-color-primary);
+  color: var(--el-color-primary-dark-2);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  margin-right: 8px;
-  font-size: 15px;
+  margin-right: 0;
+  margin-bottom: 2px;
+  font-size: 16px;
   vertical-align: middle;
-  transition: all 0.2s;
 }
 
 /* 使 logo 内图标严格水平/垂直居中 */
@@ -289,23 +239,28 @@ async function submitFeedback(): Promise<void> {
 }
 
 .app-nav .el-menu-item:hover .nav-logo {
-  background: var(--el-color-primary-light-8);
-  transform: scale(1.06);
+  color: var(--el-color-primary);
 }
 
 .app-nav .el-menu-item.is-active .nav-logo {
-  background: var(--el-color-primary);
-  color: #fff;
+  color: var(--el-color-primary);
 }
 
 .app-nav .el-menu-item .nav-label {
   font-size: 14px;
   font-weight: 500;
+  color: var(--el-color-primary-dark-2);
+}
+
+.app-nav .el-menu-item.is-active .nav-label {
+  color: var(--el-color-primary);
+  font-weight: 600;
 }
 
 /* 右侧占位，保持品牌-菜单视觉平衡 */
+/* grid 对称布局下不再需要占位 */
 .app-nav-spacer {
-  min-width: 190px;
+  display: none;
 }
 
 /* 用户区（登录状态） */
@@ -314,6 +269,8 @@ async function submitFeedback(): Promise<void> {
   align-items: center;
   margin-left: 12px;
   flex-shrink: 0;
+  justify-self: end;
+  grid-column: 3;
 }
 
 .user-trigger {
@@ -368,30 +325,79 @@ async function submitFeedback(): Promise<void> {
   min-height: 0;
 }
 
-/* ===== D · 响应式：小屏收起品牌文字、压缩间距 ===== */
-@media (max-width: 640px) {
-  .app-brand {
-    min-width: auto;
-  }
-
-  .brand-name {
-    display: none;
-  }
-
+/* ===== D · 响应式：小屏收起品牌与图标，文字标签紧凑显示 ===== */
+@media (max-width: 880px) {
   .app-nav-spacer {
     min-width: auto;
   }
 
   .app-header {
-    padding: 0 8px;
+    padding: 0 6px;
+    column-gap: 8px;
+    grid-template-columns: auto minmax(0, 1fr) auto;
   }
 
   .app-nav .el-menu-item {
-    padding: 0 12px;
+    padding: 0 5px;
   }
 
   .app-nav .el-menu-item .nav-label {
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  /* 缩小图标，与文字标签同行显示，保证全部标签可见 */
+  .app-nav .el-menu-item .nav-logo {
+    width: 18px;
+    height: 18px;
+    margin-right: 0;
+    font-size: 13px;
+  }
+
+  /* 兜底：极端窄屏仍可横向滚动 */
+  .app-nav-wrap {
+    justify-content: flex-start;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .app-nav-wrap::-webkit-scrollbar {
+    display: none;
+  }
+  .app-nav {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+  }
+  .app-user .user-name {
+    max-width: 90px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+/* 超小屏：进一步压缩字号，保持文字标签可见 */
+@media (max-width: 480px) {
+  .app-header {
+    padding: 0 4px;
+  }
+  .app-nav .el-menu-item {
+    padding: 0 3px;
+  }
+  .app-nav .el-menu-item .nav-logo {
+    width: 16px;
+    height: 16px;
+    margin-right: 0;
     font-size: 12px;
+  }
+  .app-nav .el-menu-item .nav-label {
+    font-size: 9px;
+  }
+  .app-user .user-name {
+    display: none;
+  }
+  .user-trigger {
+    padding: 8px 10px;
   }
 }
 </style>

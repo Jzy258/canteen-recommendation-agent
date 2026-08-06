@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onActivated, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ChatDotRound, MoreFilled, Plus, User } from '@element-plus/icons-vue'
+import { ChatDotRound, Menu, MoreFilled, Plus, User } from '@element-plus/icons-vue'
 import { chat, chatStream, listSessions, getSessionMessages, deleteSession, renameSession, type ChatSessionItem } from '@/api/chat'
 import { track } from '@/utils/analytics'
 import DishCard from '@/components/DishCard.vue'
@@ -25,6 +25,7 @@ const input = ref('')
 // ---- 历史对话（v1.3） ----
 const sessions = ref<ChatSessionItem[]>([])
 const historyLoading = ref(false)
+const drawerVisible = ref(false)
 
 // 菜品卡片点击后，把菜品名称填入输入框并聚焦：el-input 组件实例引用（用于调用 focus()）
 const inputRef = ref<{ focus?: () => void }>()
@@ -246,6 +247,7 @@ function startNewSession(): void {
   if (loading.value) stop()
   chatStore.clearSession()
   messages.value = []
+  drawerVisible.value = false
 }
 
 // ---- 历史对话（v1.3） ----
@@ -292,6 +294,7 @@ async function switchSession(sid: string): Promise<void> {
   if (loading.value) stop()
   chatStore.setSession(sid)
   await loadHistory()
+  drawerVisible.value = false
 }
 
 async function removeSession(sid: string): Promise<void> {
@@ -389,6 +392,14 @@ onActivated(() => {
               <el-icon class="title-icon"><ChatDotRound /></el-icon>
               <span>食堂菜品推荐与营养分析 Agent</span>
             </div>
+            <el-button
+              class="mobile-sessions-btn"
+              size="small"
+              :icon="Menu"
+              circle
+              title="历史会话"
+              @click="drawerVisible = true"
+            />
           </div>
         </template>
 
@@ -526,6 +537,48 @@ onActivated(() => {
         <el-button type="primary" @click="submitRename">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 移动端：历史会话侧拉抽屉 -->
+    <el-drawer
+      v-model="drawerVisible"
+      title="历史会话"
+      direction="rtl"
+      size="84%"
+      class="sessions-drawer"
+    >
+      <div class="drawer-body">
+        <el-button type="primary" :icon="Plus" class="drawer-new" @click="startNewSession">
+          新建会话
+        </el-button>
+        <div class="drawer-list">
+          <div v-if="historyLoading" class="sidebar-tip">加载中…</div>
+          <template v-else-if="sessions.length">
+            <div
+              v-for="s in sessions"
+              :key="s.session_id"
+              class="sidebar-item"
+              :class="{ active: s.session_id === chatStore.sessionId }"
+              @click="switchSession(s.session_id)"
+            >
+              <div class="sidebar-item-main">
+                <div class="sidebar-item-title">{{ s.title || '未命名会话' }}</div>
+                <div class="sidebar-item-time">{{ fmtSessionTime(s.created_at) }}</div>
+              </div>
+              <el-dropdown trigger="click" @command="(cmd: string) => onSessionCommand(cmd, s)">
+                <el-button size="small" text :icon="MoreFilled" @click.stop />
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="rename">重命名会话</el-dropdown-item>
+                    <el-dropdown-item command="delete" divided>删除会话</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
+          </template>
+          <el-empty v-else description="暂无历史对话" :image-size="60" />
+        </div>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -652,6 +705,28 @@ onActivated(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+/* 移动端历史会话按钮（默认隐藏，仅 <768px 显示） */
+.mobile-sessions-btn {
+  display: none;
+}
+
+.drawer-body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 10px;
+}
+
+.drawer-new {
+  width: 100%;
+}
+
+.drawer-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 2px;
 }
 
 .chat-header-actions {
@@ -932,5 +1007,33 @@ onActivated(() => {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 8px;
+}
+/* ===== 移动端：聊天区优先，历史会话叠放到底部 ===== */
+@media (max-width: 768px) {
+  .chat-page {
+    flex-direction: column;
+    height: auto;
+    min-height: calc(100vh - 56px);
+    padding: 8px 10px;
+    gap: 10px;
+  }
+  .chat-main {
+    order: 1;
+    width: 100%;
+    flex: 1;
+    min-height: 55vh;
+  }
+  .chat-card {
+    border-radius: 12px;
+  }
+  .chat-sidebar {
+    display: none;
+  }
+  .mobile-sessions-btn {
+    display: inline-flex;
+  }
+  .welcome-cards {
+    flex-wrap: wrap;
+  }
 }
 </style>

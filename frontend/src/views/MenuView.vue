@@ -452,4 +452,24 @@ onUnmounted(() => {
   z-index: 1200;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
 }
+/* ===== 移动端适配 ===== */
+@media (max-width: 768px) {
+  .menu-page {
+    padding: 10px;
+  }
+  .menu-card {
+    border-radius: 12px;
+  }
+  .menu-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 10px;
+  }
+  .menu-filter {
+    padding: 10px;
+  }
+  .mf-row {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}
 </style>
