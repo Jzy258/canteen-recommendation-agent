@@ -19,7 +19,7 @@ from agent.session import session_store
 from middleware import (RequestMetricsMiddleware, add_tokens, get_metrics,
                         count_tokens, count_messages, clean_markdown,
                         StreamMarkdownCleaner, setup_logging, get_logger)
-from version import APP_NAME, VERSION
+from version import APP_NAME, APP_TITLE, VERSION
 from auth import auth_router, get_optional_user
 from auth.admin import router as admin_router
 
@@ -110,7 +110,8 @@ class ChatResponse(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    """健康检查 + 版本信息（供前端关于页展示）。"""
+    return {"status": "ok", "name": APP_NAME, "title": APP_TITLE, "version": VERSION}
 
 
 @app.get("/docs", include_in_schema=False)

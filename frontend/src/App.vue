@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeMount } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
-import { ChatDotRound, KnifeFork, Notebook, Setting, SwitchButton, TrendCharts, User } from '@element-plus/icons-vue'
+import { ChatDotRound, InfoFilled, KnifeFork, Notebook, Setting, SwitchButton, TrendCharts, User } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { isTokenExpired } from '@/utils/jwt'
 
@@ -26,6 +26,10 @@ function onLogout(): void {
 
 function goLogin(): void {
   window.location.href = `${import.meta.env.BASE_URL}login`
+}
+
+function goAbout(): void {
+  window.location.href = `${import.meta.env.BASE_URL}about`
 }
 </script>
 
@@ -99,7 +103,11 @@ function goLogin(): void {
                 <el-dropdown-item v-if="authStore.isAdmin" disabled>
                   管理员
                 </el-dropdown-item>
-                <el-dropdown-item :divided="authStore.isAdmin" @click="onLogout">
+                <el-dropdown-item :divided="authStore.isAdmin" @click="goAbout">
+                  <el-icon style="margin-right: 4px"><InfoFilled /></el-icon>
+                  关于
+                </el-dropdown-item>
+                <el-dropdown-item @click="onLogout">
                   <el-icon style="margin-right: 4px"><SwitchButton /></el-icon>
                   退出登录
                 </el-dropdown-item>
